@@ -1,0 +1,22 @@
+# Never let credentials into the build context or the image layer.
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local runtime + VCS noise
+.git/
+.gitignore
+*.log
+.DS_Store
+data/competitors.json
+
+# Docs are not needed at runtime; keeps the context small.
+README.md
+docs/

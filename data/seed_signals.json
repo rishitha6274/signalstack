@@ -1,0 +1,176 @@
+{
+  "dataset": "signal-stack-seed-v1",
+  "note": "Synthetic competitor intelligence. Fictional companies, fabricated events. The Nimbus AI series contains a deliberately correlated funding -> hiring -> pricing -> messaging chain spanning six months; the distractor signal (2026-03-11) is included so a synthesis has to discriminate rather than pattern-match everything. Vertex Cloud and Pathfinder Labs are intentionally thin and uncorrelated, to show the agent refuses to invent a strategy from sparse data.",
+  "competitors": [
+    {
+      "name": "Nimbus AI",
+      "profile": "AI workflow platform. The demo case: a clear strategic arc from a Series C into an enterprise land-grab.",
+      "signals": [
+        {
+          "competitor": "Nimbus AI",
+          "date": "2026-02-18",
+          "signal_type": "funding",
+          "summary": "Nimbus AI closed a $120M Series C at a $1.4B valuation, with the round explicitly earmarked for go-to-market expansion and enterprise readiness.",
+          "raw_notes": "Nimbus AI announced a $120M Series C on Feb 18, 2026 at a reported $1.4B valuation, up from $600M. Led by Ridgeline Partners with participation from existing seed investors. CFO said proceeds will 'fund go-to-market expansion and enterprise readiness' and that they will roughly triple the sales and customer-success org in the next two quarters.",
+          "source": "press release"
+        },
+        {
+          "competitor": "Nimbus AI",
+          "date": "2026-02-27",
+          "signal_type": "messaging",
+          "summary": "Nimbus AI renews its 'AI for everyone' self-serve campaign nine days after the raise, with no enterprise language on the site.",
+          "raw_notes": "Homepage still leads with 'AI for everyone - no code required'. Paid social campaign running on founder-influencer creative. Careers page lists 22 openings, none in enterprise sales. No mention of SSO, compliance, or procurement anywhere on the site.",
+          "source": "homepage snapshot"
+        },
+        {
+          "competitor": "Nimbus AI",
+          "date": "2026-03-05",
+          "signal_type": "hiring",
+          "summary": "Two weeks after the Series C, Nimbus AI posts four go-to-market roles at once, including an Enterprise Account Executive and an SDR manager.",
+          "raw_notes": "Four new postings in a single week: Enterprise Account Executive (remote, US), SDR Manager, Revenue Operations Analyst, GTM Operations Lead. Total headcount 84. Job descriptions reference 'our Series C' and 'building the enterprise motion from scratch'.",
+          "source": "job board scrape"
+        },
+        {
+          "competitor": "Nimbus AI",
+          "date": "2026-03-11",
+          "signal_type": "feature",
+          "summary": "Nimbus AI ships dark mode and CSV export, a self-serve quality-of-life release unrelated to the go-to-market buildout.",
+          "raw_notes": "Release 4.2: dark mode across web and mobile, CSV export for run history, 3x faster dashboard load. Changelog framed entirely around individual user experience. No enterprise or admin features in this release.",
+          "source": "changelog"
+        },
+        {
+          "competitor": "Nimbus AI",
+          "date": "2026-03-24",
+          "signal_type": "hiring",
+          "summary": "Nimbus AI posts five more go-to-market roles in one week, including its first Solutions Architect, extending the post-funding hiring spike to nine roles in 20 days.",
+          "raw_notes": "Five new postings in seven days: two Enterprise AEs, Enterprise SDR x2, and the company's first Solutions Architect role. Careers page now shows 31 openings, 9 of them GTM. Two listings explicitly ask for experience selling to Fortune 1000 buyers.",
+          "source": "job board scrape"
+        },
+        {
+          "competitor": "Nimbus AI",
+          "date": "2026-04-15",
+          "signal_type": "pricing",
+          "summary": "Nimbus AI cuts Pro pricing from $49 to $32 per seat per month, a 35% reduction, three weeks after the hiring spike peaks.",
+          "raw_notes": "Pricing page updated: Pro moves from $49/seat/mo to $32/seat/mo billed annually. Existing customers on legacy $49 pricing grandfathered for 12 months. Sticker change coincides with a 'Now 35% cheaper' banner on the homepage.",
+          "source": "pricing page snapshot"
+        },
+        {
+          "competitor": "Nimbus AI",
+          "date": "2026-05-06",
+          "signal_type": "pricing",
+          "summary": "Nimbus AI adds a 20% volume discount for teams of 5+ and removes monthly billing for those teams, pushing larger deals to annual commitments.",
+          "raw_notes": "Pricing page update: Team tier introduces 20% volume discount at 5+ seats and 30% at 20+ seats. Monthly billing removed for teams above 5 seats - annual only. FAQ updated to say volume pricing is 'negotiable for enterprise agreements'.",
+          "source": "pricing page snapshot"
+        },
+        {
+          "competitor": "Nimbus AI",
+          "date": "2026-05-20",
+          "signal_type": "messaging",
+          "summary": "Nimbus AI replaces 'AI for everyone' with 'Enterprise-ready AI for growing companies' across the homepage and paid creative, two weeks after the second pricing move.",
+          "raw_notes": "Full homepage rewrite. New headline: 'Enterprise-ready AI for growing companies'. Subhead now leads with admin controls, SSO, and audit logs rather than ease of use. 'AI for everyone' campaign retired. Paid social creative switched from founder-influencer to IT-buyer and CIO personas.",
+          "source": "homepage snapshot"
+        },
+        {
+          "competitor": "Nimbus AI",
+          "date": "2026-06-03",
+          "signal_type": "feature",
+          "summary": "Nimbus AI ships SSO, SCIM provisioning and audit logs at general availability, substantiating the new enterprise-ready messaging within two weeks.",
+          "raw_notes": "Release 5.0: SAML SSO, SCIM user provisioning, and admin audit logs, all generally available. Marketing page updated the same day with a dedicated 'Enterprise-ready' section. No pricing attached to these features at launch - included on all tiers.",
+          "source": "changelog"
+        },
+        {
+          "competitor": "Nimbus AI",
+          "date": "2026-06-24",
+          "signal_type": "hiring",
+          "summary": "Nimbus AI opens three strategic-enterprise roles including a Field Engineer, a Strategic Account Executive and a second Solutions Architect.",
+          "raw_notes": "New postings: Field Engineer (enterprise deployments), Strategic Account Executive (Fortune 1000), Solutions Architect II. Careers page now 38 openings. This is the first posting cluster focused on named enterprise accounts rather than inbound SDR volume.",
+          "source": "job board scrape"
+        },
+        {
+          "competitor": "Nimbus AI",
+          "date": "2026-07-15",
+          "signal_type": "messaging",
+          "summary": "Nimbus AI launches a 'Built for the Enterprise' campaign and teasers an Enterprise tier on the pricing page.",
+          "raw_notes": "New campaign across site, LinkedIn and a sponsored industry newsletter: 'Built for the Enterprise'. Pricing page gains a 'Coming soon: Enterprise' card with no price listed and a 'Contact sales' CTA. Analyst briefings scheduled for August.",
+          "source": "press + pricing page"
+        },
+        {
+          "competitor": "Nimbus AI",
+          "date": "2026-08-19",
+          "signal_type": "pricing",
+          "summary": "Nimbus AI publishes an Enterprise tier and restricts the 20% volume discount to Enterprise contracts, ending self-serve volume pricing.",
+          "raw_notes": "Enterprise tier now live: custom pricing, 'Contact sales' CTA is the primary button on the pricing page. The 20% self-serve volume discount is removed and relabelled as available only within Enterprise contracts. Analyst briefings from August are being turned into a formal GA announcement.",
+          "source": "pricing page snapshot"
+        }
+      ]
+    },
+    {
+      "name": "Vertex Cloud",
+      "profile": "Enterprise hosting incumbent. Thin, flat signal set - the control case for 'does not hallucinate patterns'.",
+      "signals": [
+        {
+          "competitor": "Vertex Cloud",
+          "date": "2026-01-22",
+          "signal_type": "feature",
+          "summary": "Vertex Cloud launched on-premise deployment for regulated customers.",
+          "raw_notes": "Product update: on-premise deployment option now generally available for healthcare and financial services customers. Priced as a one-time deployment fee plus annual support.",
+          "source": "product update"
+        },
+        {
+          "competitor": "Vertex Cloud",
+          "date": "2026-04-08",
+          "signal_type": "pricing",
+          "summary": "Vertex Cloud added a $2,000 per month minimum spend on the Business plan.",
+          "raw_notes": "Pricing update: Business plan now requires $2,000/month minimum. Applies to new customers only; existing contracts unaffected. No other tier pricing changed.",
+          "source": "pricing page snapshot"
+        },
+        {
+          "competitor": "Vertex Cloud",
+          "date": "2026-06-30",
+          "signal_type": "messaging",
+          "summary": "Vertex Cloud's new CEO published a press quote focused on predictable cloud costs.",
+          "raw_notes": "Incoming CEO Priya Raman quoted in a trade publication on infrastructure cost predictability. Standard product messaging otherwise unchanged. No pricing, hiring, or packaging change announced alongside.",
+          "source": "press coverage"
+        },
+        {
+          "competitor": "Vertex Cloud",
+          "date": "2026-08-12",
+          "signal_type": "feature",
+          "summary": "Vertex Cloud added automatic regional failover for Business and Enterprise plans.",
+          "raw_notes": "Changelog: automatic regional failover available on Business and Enterprise. Marketing makes no change beyond the changelog entry. No pricing attached.",
+          "source": "changelog"
+        }
+      ]
+    },
+    {
+      "name": "Pathfinder Labs",
+      "profile": "Small developer-tools startup. Second thin control case, even sparser than Vertex Cloud.",
+      "signals": [
+        {
+          "competitor": "Pathfinder Labs",
+          "date": "2026-03-18",
+          "signal_type": "feature",
+          "summary": "Pathfinder Labs shipped a command-line interface for its SDK.",
+          "raw_notes": "Release: public beta of the pathfinder CLI. Blog post covers installation and a quickstart. No pricing or packaging change.",
+          "source": "blog"
+        },
+        {
+          "competitor": "Pathfinder Labs",
+          "date": "2026-06-11",
+          "signal_type": "pricing",
+          "summary": "Pathfinder Labs introduced usage-based overage pricing above the included API quota.",
+          "raw_notes": "Pricing update: API overage billed at $0.002 per 1k requests above the included monthly quota. Self-serve checkout only, no sales contact offered at any tier.",
+          "source": "pricing page snapshot"
+        },
+        {
+          "competitor": "Pathfinder Labs",
+          "date": "2026-08-05",
+          "signal_type": "messaging",
+          "summary": "Pathfinder Labs sponsored a developer conference and published a recap post.",
+          "raw_notes": "Company blog: recap of sponsoring a regional developer conference, plus a talk by a cofounder. No product, pricing, or hiring announcements in the post.",
+          "source": "blog"
+        }
+      ]
+    }
+  ]
+}
