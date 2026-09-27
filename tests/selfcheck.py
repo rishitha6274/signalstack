@@ -382,6 +382,35 @@ def main() -> int:
     check("Dockerfile refuses to bake a .env into the image",
           "test ! -f .env" in Path("Dockerfile").read_text())
 
+    # The display-name registry is gitignored and NOT in the image, so a fresh
+    # container has none. It used to fall back to Hindsight's `name`, which
+    # echoes bank_id — the UI then showed "competitor-nimbus-ai" and resolved
+    # lookups to "competitor-competitor-nimbus-ai", silently rendering 0
+    # signals. Found only by running the real image.
+    import tempfile as _tf
+    real_reg, real_seed = hc.REGISTRY_FILE, hc.SEED_FILE
+    hc.REGISTRY_FILE = Path(_tf.mkdtemp()) / "competitors.json"
+    try:
+        check("fresh container: registry self-initialises from the seed file",
+              hc._read_registry() != {}, f"got {hc._read_registry()}")
+        check("fresh container: true display name survives",
+              hc._display_name("nimbus-ai") == "Nimbus AI",
+              f"got {hc._display_name('nimbus-ai')!r}")
+        check("display name round-trips to the right bank id",
+              hc.bank_id_for(hc._display_name("nimbus-ai")) == "competitor-nimbus-ai",
+              f"got {hc.bank_id_for(hc._display_name('nimbus-ai'))}")
+        # A bank_id echoed back as `name` must not be mistaken for a display
+        # name — that was the mechanism of the bug.
+        echoed = [b for b in double.BANKS.values()]
+        comps = client.list_competitors()
+        check("no competitor is ever named after its bank_id",
+              all(c.name != c.bank_id and not c.name.startswith("competitor-") for c in comps),
+              f"got {[c.name for c in comps]}")
+        check("all competitors resolve to real timelines",
+              all(c.signal_count > 0 for c in comps),
+              f"got {[(c.name, c.signal_count) for c in comps]}")
+    finally:
+        hc.REGISTRY_FILE, hc.SEED_FILE = real_reg, real_seed
     # Tear the double down only once every section is done. It was shut down
     # before the last section once, which made those checks pass vacuously.
     httpd.shutdown()
@@ -391,6 +420,7 @@ def main() -> int:
     # Summarise last, so the tally covers every section.
     failed = [n for ok, n in _results if not ok]
     total = len(_results)
+
 
     print("\n" + "─" * 62)
     if failed:

@@ -45,6 +45,7 @@ from .config import (
     HINDSIGHT_BASE_URL,
     MAX_TIMELINE_PAGES,
     REGISTRY_FILE,
+    SEED_FILE,
     TIMELINE_PAGE_SIZE,
 )
 from .models import CompetitorOut, Signal, slugify_competitor
@@ -89,13 +90,41 @@ def bank_id_for(competitor: str) -> str:
 # exist. The registry exists only to preserve original casing ("Nimbus AI",
 # not "nimbus ai") across restarts.
 # ---------------------------------------------------------------------------
+def _seed_file_names() -> dict[str, str]:
+    """slug -> display name, taken from the seed dataset.
+
+    The seed file ships inside the container, so it is the one source of true
+    display names available on a cold deploy. Hindsight's bank listing is not:
+    it echoes bank_id back as `name`, which would make the UI show
+    "competitor-nimbus-ai" and — worse — resolve lookups to
+    "competitor-competitor-nimbus-ai", silently rendering 0 signals.
+    """
+    try:
+        payload = json.loads(SEED_FILE.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+    names: dict[str, str] = {}
+    for block in payload.get("competitors", []):
+        name = (block.get("name") or "").strip()
+        if name:
+            names[slugify_competitor(name)] = name
+    return names
+
+
 def _read_registry() -> dict[str, str]:
     try:
         with REGISTRY_FILE.open("r", encoding="utf-8") as fh:
             data = json.load(fh)
-        return data if isinstance(data, dict) else {}
+        registry = data if isinstance(data, dict) else {}
     except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+        registry = {}
+
+    # Self-initialise on a cold deploy. The registry is gitignored, so a fresh
+    # container has none, and without this every competitor falls back to its
+    # bank_id — the deploy renders three empty timelines for no visible reason.
+    if not registry:
+        registry = _seed_file_names()
+    return registry
 
 
 def _write_registry(registry: dict[str, str]) -> None:
@@ -419,14 +448,27 @@ class HindsightClient:
             if not bank_id.startswith(f"{BANK_PREFIX}-"):
                 continue  # not one of ours; another agent may share this project
             slug = bank_id[len(BANK_PREFIX) + 1 :]
+            # Hindsight echoes bank_id back as `name` on some deployments, so an
+            # echo is not a display name. Prefer, in order: our registry, the
+            # seed dataset, a bank name that is genuinely different, then a
+            # title-cased slug.
+            echoed = (bank.get("name") or "").strip()
+            name = (
+                registry.get(slug)
+                or (echoed if echoed and echoed != bank_id else "")
+                or _display_name(slug)
+            )
             by_slug[slug] = {
-                "name": registry.get(slug) or (bank.get("name") or "").strip() or _display_name(slug),
+                "name": name,
                 "slug": slug,
                 "bank_id": bank_id,
                 "fact_count": bank.get("fact_count", 0) or 0,
                 "last_write_at": bank.get("last_write_at"),
             }
 
+        # Union in registry-only competitors: a bank removed server-side should
+        # not silently disappear from the UI, and the registry is the only place
+        # that remembers the original casing.
         for slug, name in registry.items():
             by_slug.setdefault(
                 slug,
