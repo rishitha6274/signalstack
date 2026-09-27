@@ -1,0 +1,38 @@
+# Render blueprint — deploys the prebuilt single-image container.
+#
+# Render builds the Dockerfile itself, so Docker is not needed locally. The
+# image exposes one port (Streamlit on 8501); the API is loopback-only inside
+# the container and is never exposed.
+#
+# On first deploy, fill in the two secret values when Render prompts. Generate
+# them with:
+#   render secrets set HINDSIGHT_API_KEY=...   # or paste into the dashboard
+#
+# A free web service spins down after ~15 minutes idle and wakes on the next
+# request, so the first load after a pause takes a few seconds. 512 MB RAM is
+# the free-tier limit; this container runs two Python processes inside it.
+services:
+  - type: web
+    name: signal-stack
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /_stcore/health
+    # Only the UI port is published.
+    ports:
+      - port: 8501
+        type: web
+        protocol: tcp
+    envVars:
+      - key: HINDSIGHT_API_KEY
+        sync: false # enter in the dashboard; never committed
+      - key: GROQ_API_KEY
+        sync: false # enter in the dashboard; never committed
+      - key: HINDSIGHT_BASE_URL
+        value: https://api.hindsight.vectorize.io
+      - key: GROQ_BASE_URL
+        value: https://api.groq.com/openai/v1
+      # Demo data is seeded on first boot when memory is empty. Set to 0 to
+      # never write to memory on start.
+      - key: AUTOSEED
+        value: "1"
