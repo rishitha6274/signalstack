@@ -1,0 +1,17 @@
+{
+  "competitor": "Lumen Health",
+  "patterns": "A repeating hiring→feature transition is observed: hiring on 2026-04-08 followed by a feature on 2026-04-29 (interval 21 days), and hiring on 2026-07-14 followed by a feature on 2026-08-11 (interval 28 days). This hiring‑then‑feature pattern occurs twice.",
+  "inferred_intent": "Lumen Health appears to be strengthening its hospital‑IT product stack by hiring specialized compliance, security, and integration staff and then delivering new technical capabilities (audit logging, HL7/FHIR bulk sync) to appeal to health‑system buyers.",
+  "predicted_next_move": "Because the stream is 22 days past its 26‑day rhythm, Lumen Health is likely to issue a new hiring announcement (e.g., additional implementation or EHR‑integration engineering roles) between 2026-09-28 and 2026-10-20, which would resolve the overdue cadence.",
+  "recommendation": "Contact Lumen Health's recruiting or talent acquisition team this quarter to offer our recruiting‑as‑a‑service platform as a partner for the anticipated implementation/EHR‑integration hires.",
+  "confidence": "low",
+  "missing_evidence": "A second observed feature→hiring transition would most increase confidence in the predicted hiring move.",
+  "narrative_withheld": false,
+  "signal_count": 9,
+  "timeline_window": "2026-01-14 to 2026-08-11",
+  "model_used": "openai/gpt-oss-120b",
+  "data_as_of": "2026-08-11",
+  "evidence_age_days": 48,
+  "evidence_staleness": "aging",
+  "days_overdue": 22
+}

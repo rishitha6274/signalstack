@@ -1,0 +1,16 @@
+{
+  "competitor": "Vertex Cloud",
+  "patterns": "Insufficient evidence; each transition (feature→pricing, pricing→messaging, messaging→feature) appears only once, no repeated ordering.",
+  "inferred_intent": "Insufficient evidence to infer a strategic intent.",
+  "predicted_next_move": "No reliable prediction can be made; additional signals are needed to establish a pattern.",
+  "recommendation": "Continue monitoring Vertex Cloud and specifically watch for a repeat of the feature→pricing→messaging→feature sequence in the next quarter.",
+  "confidence": "none",
+  "missing_evidence": "A second occurrence of the observed sequence (e.g., another feature→pricing transition) would confirm a pattern and raise confidence.",
+  "signal_count": 4,
+  "timeline_window": "2026-01-22 to 2026-08-12",
+  "model_used": "openai/gpt-oss-120b",
+  "data_as_of": "2026-08-12",
+  "evidence_age_days": 47,
+  "evidence_staleness": "fresh",
+  "days_overdue": 0
+}

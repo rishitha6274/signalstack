@@ -1,0 +1,332 @@
+{
+  "Nimbus AI": {
+    "verdicts": {
+      "A": "PASS",
+      "B": "PASS",
+      "C": "PASS",
+      "D": "PASS",
+      "E": "PASS"
+    },
+    "notes": {
+      "A": [],
+      "B": [],
+      "C": [],
+      "D": [],
+      "E": []
+    },
+    "read": {
+      "competitor": "Nimbus AI",
+      "patterns": "The only repeating transition is feature \u2192 hiring, observed twice: a feature release on 2026-03-11 (dark mode & CSV export) followed by four go\u2011to\u2011market hires on 2026-03-24, and a feature release on 2026-06-03 (SSO, SCIM, audit logs) followed by three strategic\u2011enterprise hires on 2026-06-24. Earlier there is a one\u2011off sequence pricing \u2192 pricing \u2192 messaging \u2192 feature (04\u201115, 05\u201106, 05\u201120, 06\u201103).",
+      "inferred_intent": "Nimbus AI is systematically building an enterprise\u2011ready go\u2011to\u2011market engine: funding enabled hiring spikes, product features (SSO, SCIM, audit logs) unlock enterprise contracts, pricing moves create a dedicated Enterprise tier, and messaging shifts reinforce the enterprise narrative.",
+      "predicted_next_move": "Release a new enterprise\u2011focused feature (e.g., advanced admin console or usage analytics) within the next 14 days (by 2026-10-12), which would be 26 days overdue relative to the 14\u2011day rhythm noted in the facts.",
+      "recommendation": "Develop a side\u2011by\u2011side feature comparison sheet and schedule outreach to prospects evaluating enterprise AI platforms, positioning our solution as a ready alternative before Nimbus\u2019s next feature lands.",
+      "confidence": "low",
+      "missing_evidence": "A concrete feature\u2011release signal after today (e.g., an announcement of an enterprise admin capability) would most raise confidence in the forecast.",
+      "signal_count": 12,
+      "timeline_window": "2026-02-18 to 2026-08-19",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-08-19",
+      "evidence_age_days": 40,
+      "evidence_staleness": "stale",
+      "days_overdue": 26
+    }
+  },
+  "Palisade Security": {
+    "verdicts": {
+      "A": "PASS",
+      "B": "PASS",
+      "C": "PASS",
+      "D": "PASS",
+      "E": "PASS"
+    },
+    "notes": {
+      "A": [],
+      "B": [],
+      "C": [],
+      "D": [],
+      "E": []
+    },
+    "read": {
+      "competitor": "Palisade Security",
+      "patterns": "The timeline shows a single observed sequence of signal types: feature (2026-01-09) \u2192 messaging (2026-01-23) \u2192 funding (2026-02-27) \u2192 hiring (2026-03-20) \u2192 feature (2026-04-17) \u2192 pricing (2026-05-22) \u2192 messaging (2026-06-19) \u2192 feature (2026-07-24) \u2192 hiring (2026-08-14) \u2192 pricing (2026-09-05) \u2192 feature (2026-09-25). Each transition appears only once (see FACTS).",
+      "inferred_intent": "Palisade is pursuing a compliance\u2011centric strategy aimed at US federal and European data\u2011residency markets, adding certifications, a sovereign cloud region, and dedicated pricing tiers to attract government and privacy\u2011sensitive customers.",
+      "predicted_next_move": "Within the next 30 days (by 2026-10-28) Palisade will issue a public messaging update\u2014such as a homepage tagline or blog post\u2014highlighting its new sovereign\u2011cloud capability and data\u2011residency compliance for European customers.",
+      "recommendation": "Develop a competitive brief on our own data\u2011residency and compliance features and engage EU\u2011focused prospects before Palisade\u2019s anticipated messaging rollout.",
+      "confidence": "low",
+      "missing_evidence": "A follow\u2011up messaging signal after the 2026-09-25 feature would confirm a recurring feature\u2011to\u2011messaging transition.",
+      "signal_count": 11,
+      "timeline_window": "2026-01-09 to 2026-09-25",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-09-25",
+      "evidence_age_days": 3,
+      "evidence_staleness": "fresh",
+      "days_overdue": 0
+    }
+  },
+  "Lumen Health": {
+    "verdicts": {
+      "A": "PASS",
+      "B": "PASS",
+      "C": "PASS",
+      "D": "FAIL",
+      "E": "FAIL"
+    },
+    "notes": {
+      "A": [],
+      "B": [],
+      "C": [],
+      "D": [
+        "QUOTE NOT VERBATIM IN TIMELINE (patterns): \"s validators (interval claim \""
+      ],
+      "E": [
+        "claims ~7 day cadence (=7d) but the median gap is 26.5d (gaps [26, 36, 22, 21, 28, 27, 21, 28])"
+      ]
+    },
+    "read": {
+      "competitor": "Lumen Health",
+      "patterns": "9 signals recorded (3 feature, 1 funding, 2 hiring, 2 messaging, 1 pricing). Measured intervals in days: [26, 36, 22, 21, 28, 27, 21, 28] \u2014 the median gap between consecutive signals is 26 days (range 21-36). The stream is 22 day(s) past that rhythm, so this timeline is aging. Narrative synthesis was generated twice and rejected by the application's validators (interval claim '7 days' does not correspond to any measured interval (real intervals: [26, 36, 22, 21, 28, 27, 21, 28], median 26)), so it is withheld rather than shown unverified. The measurements above are exact.",
+      "inferred_intent": "Not inferred. The model did not produce a claim about intent that passed the evidence checks, and an unsupported intent is worse than none.",
+      "predicted_next_move": "Not predicted. The last signal is dated 2026-08-11 (48 day(s) ago) and the stream is 22 day(s) past that rhythm, so this timeline is aging.",
+      "recommendation": "Re-run the strategic read, or check the LLM response against the measured facts above: intervals [26, 36, 22, 21, 28, 27, 21, 28], median 26 days.",
+      "confidence": "none",
+      "missing_evidence": "A model response that cites only these measured intervals ([26, 36, 22, 21, 28, 27, 21, 28]) and acknowledges the 22-day overdue gap would raise confidence from none.",
+      "signal_count": 9,
+      "timeline_window": "2026-01-14 to 2026-08-11",
+      "model_used": "rejected by validators (interval claim '7 days' does not correspond to any measured interval (real inter)",
+      "data_as_of": "2026-08-11",
+      "evidence_age_days": 48,
+      "evidence_staleness": "aging",
+      "days_overdue": 22
+    }
+  },
+  "Corvus Data": {
+    "verdicts": {
+      "A": "PASS",
+      "B": "PASS",
+      "C": "PASS",
+      "D": "PASS",
+      "E": "PASS"
+    },
+    "notes": {
+      "A": [],
+      "B": [],
+      "C": [],
+      "D": [],
+      "E": []
+    },
+    "read": {
+      "competitor": "Corvus Data",
+      "patterns": "A repeating three\u2011step sequence appears: feature \u2192 messaging \u2192 pricing. First cycle: 2026-02-19 (feature) \u2192 2026-03-26 (messaging) \u2192 2026-05-07 (pricing). Second cycle: 2026-07-16 (feature) \u2192 2026-08-20 (messaging) \u2192 2026-09-08 (pricing). Both cycles follow the median interval of 35 days between signals (FACTS). Other transitions (pricing\u2192hiring, hiring\u2192feature, pricing\u2192feature) occur only once.",
+      "inferred_intent": "Corvus Data is systematically rolling out product enhancements, then amplifying them with targeted messaging, and finally adjusting pricing to capture revenue from the managed service, indicating a coordinated go\u2011to\u2011market push for its cloud offering.",
+      "predicted_next_move": "A messaging announcement (e.g., blog post, press release, or compliance highlight) about the new column\u2011level lineage UI is expected by 2026-10-30, roughly 35 days after the 2026-09-24 feature signal.",
+      "recommendation": "Prepare a competitive briefing and a counter\u2011marketing message that emphasizes our own lineage capabilities, to be deployed before the anticipated October announcement.",
+      "confidence": "high",
+      "missing_evidence": "A messaging signal occurring after 2026-09-24 would confirm the recurring feature\u2192messaging\u2192pricing cycle.",
+      "signal_count": 8,
+      "timeline_window": "2026-02-19 to 2026-09-24",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-09-24",
+      "evidence_age_days": 4,
+      "evidence_staleness": "fresh",
+      "days_overdue": 0
+    }
+  },
+  "Halcyon Mobility": {
+    "verdicts": {
+      "A": "PASS",
+      "B": "PASS",
+      "C": "PASS",
+      "D": "FAIL",
+      "E": "FAIL"
+    },
+    "notes": {
+      "A": [],
+      "B": [],
+      "C": [],
+      "D": [
+        "QUOTE NOT VERBATIM IN TIMELINE (patterns): \"s validators (interval claim \""
+      ],
+      "E": [
+        "claims ~30 day cadence (=30d) but the median gap is 38d (gaps [40, 42, 36, 37, 39, 38, 25])"
+      ]
+    },
+    "read": {
+      "competitor": "Halcyon Mobility",
+      "patterns": "8 signals recorded (3 feature, 1 funding, 1 hiring, 1 messaging, 2 pricing). Measured intervals in days: [40, 42, 36, 37, 39, 38, 25] \u2014 the median gap between consecutive signals is 38 days (range 25-42). The stream is within its usual rhythm, so this timeline is fresh. Narrative synthesis was generated twice and rejected by the application's validators (interval claim '30 days' does not correspond to any measured interval (real intervals: [40, 42, 36, 37, 39, 38, 25], median 38)), so it is withheld rather than shown unverified. The measurements above are exact.",
+      "inferred_intent": "Not inferred. The model did not produce a claim about intent that passed the evidence checks, and an unsupported intent is worse than none.",
+      "predicted_next_move": "Not predicted. The last signal is dated 2026-09-22 (6 day(s) ago).",
+      "recommendation": "Re-run the strategic read, or check the LLM response against the measured facts above: intervals [40, 42, 36, 37, 39, 38, 25], median 38 days.",
+      "confidence": "none",
+      "missing_evidence": "A model response that cites only these measured intervals ([40, 42, 36, 37, 39, 38, 25]) and acknowledges the 0-day overdue gap would raise confidence from none.",
+      "signal_count": 8,
+      "timeline_window": "2026-01-08 to 2026-09-22",
+      "model_used": "rejected by validators (interval claim '30 days' does not correspond to any measured interval (real inte)",
+      "data_as_of": "2026-09-22",
+      "evidence_age_days": 6,
+      "evidence_staleness": "fresh",
+      "days_overdue": 0
+    }
+  },
+  "Brightline Retail": {
+    "verdicts": {
+      "A": "PASS",
+      "B": "PASS",
+      "C": "PASS",
+      "D": "PASS",
+      "E": "PASS"
+    },
+    "notes": {
+      "A": [],
+      "B": [],
+      "C": [],
+      "D": [],
+      "E": []
+    },
+    "read": {
+      "competitor": "Brightline Retail",
+      "patterns": "Brightline Retail follows a repeating 3\u2011step cycle: feature \u2192 messaging \u2192 pricing, each spaced 28 days. The cycle appears from 2026\u201101\u201119 (feature) \u2192 2026\u201102\u201116 (messaging) \u2192 2026\u201103\u201116 (pricing), repeats at 2026\u201104\u201113 (feature) \u2192 2026\u201105\u201111 (messaging) \u2192 2026\u201106\u201108 (pricing), and again with 2026\u201107\u201106 (feature).",
+      "inferred_intent": "The sequence of introducing a feature, then reshaping messaging to highlight that feature, followed by a pricing adjustment suggests a strategic intent to monetize new capabilities by first building awareness and then extracting higher revenue.",
+      "predicted_next_move": "We expect Brightline Retail to issue a messaging announcement (e.g., new positioning or rebranding) within the next week (by 2026-10-05), which would be the overdue messaging step 56 days past its 28\u2011day rhythm.",
+      "recommendation": "Assign a market\u2011watch team to alert us within 48\u202fhours of any Brightline Retail messaging release and prepare a rapid\u2011response positioning brief to be deployed immediately after the announcement.",
+      "confidence": "medium",
+      "missing_evidence": "A messaging signal from Brightline Retail after 2026-09-28 would most increase confidence in the predicted cycle.",
+      "signal_count": 7,
+      "timeline_window": "2026-01-19 to 2026-07-06",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-07-06",
+      "evidence_age_days": 84,
+      "evidence_staleness": "stale",
+      "days_overdue": 56
+    }
+  },
+  "Ferrous Systems": {
+    "verdicts": {
+      "A": "PASS",
+      "B": "PASS",
+      "C": "PASS",
+      "D": "PASS",
+      "E": "PASS"
+    },
+    "notes": {
+      "A": [],
+      "B": [],
+      "C": [],
+      "D": [],
+      "E": []
+    },
+    "read": {
+      "competitor": "Ferrous Systems",
+      "patterns": "Insufficient evidence to identify a repeating pattern; only single-instance transitions observed (e.g., feature\u2192hiring on 2026-08-20, hiring\u2192messaging on 2026-09-16). A second occurrence of any transition would be needed.",
+      "inferred_intent": "Cannot determine strategic intent due to lack of repeated sequence.",
+      "predicted_next_move": "No reliable prediction can be made at this time.",
+      "recommendation": "Continue monitoring Ferrous Systems and collect additional signals, especially watching for a repeat of any transition (e.g., another feature\u2192hiring or pricing\u2192feature) within the next 30 days.",
+      "confidence": "none",
+      "missing_evidence": "A second occurrence of any observed transition (e.g., another feature\u2192hiring) would allow pattern identification.",
+      "signal_count": 6,
+      "timeline_window": "2026-02-05 to 2026-09-16",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-09-16",
+      "evidence_age_days": 12,
+      "evidence_staleness": "fresh",
+      "days_overdue": 0
+    }
+  },
+  "Vertex Cloud": {
+    "verdicts": {
+      "A": "PASS",
+      "B": "PASS",
+      "C": "PASS",
+      "D": "PASS",
+      "E": "PASS"
+    },
+    "notes": {
+      "A": [],
+      "B": [],
+      "C": [],
+      "D": [],
+      "E": []
+    },
+    "read": {
+      "competitor": "Vertex Cloud",
+      "patterns": "Insufficient evidence; each transition (feature\u2192pricing, pricing\u2192messaging, messaging\u2192feature) appears only once, no repeated ordering.",
+      "inferred_intent": "Insufficient evidence to infer a strategic intent.",
+      "predicted_next_move": "No reliable prediction can be made; additional signals are needed to establish a pattern.",
+      "recommendation": "Continue monitoring Vertex Cloud and specifically watch for a repeat of the feature\u2192pricing\u2192messaging\u2192feature sequence in the next quarter.",
+      "confidence": "none",
+      "missing_evidence": "A second occurrence of the observed sequence (e.g., another feature\u2192pricing transition) would confirm a pattern and raise confidence.",
+      "signal_count": 4,
+      "timeline_window": "2026-01-22 to 2026-08-12",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-08-12",
+      "evidence_age_days": 47,
+      "evidence_staleness": "fresh",
+      "days_overdue": 0
+    }
+  },
+  "Pathfinder Labs": {
+    "verdicts": {
+      "A": "PASS",
+      "B": "PASS",
+      "C": "PASS",
+      "D": "FAIL",
+      "E": "PASS"
+    },
+    "notes": {
+      "A": [],
+      "B": [],
+      "C": [],
+      "D": [
+        "QUOTE NOT VERBATIM IN TIMELINE (patterns): \"s validators (a refusal must report confidence \""
+      ],
+      "E": []
+    },
+    "read": {
+      "competitor": "Pathfinder Labs",
+      "patterns": "3 signals recorded (1 feature, 1 messaging, 1 pricing). Measured intervals in days: [85, 55] \u2014 the median gap between consecutive signals is 70 days (range 55-85). The stream is within its usual rhythm, so this timeline is fresh. Narrative synthesis was generated twice and rejected by the application's validators (a refusal must report confidence 'none'), so it is withheld rather than shown unverified. The measurements above are exact.",
+      "inferred_intent": "Not inferred. The model did not produce a claim about intent that passed the evidence checks, and an unsupported intent is worse than none.",
+      "predicted_next_move": "Not predicted. The last signal is dated 2026-08-05 (54 day(s) ago).",
+      "recommendation": "Re-run the strategic read, or check the LLM response against the measured facts above: intervals [85, 55], median 70 days.",
+      "confidence": "none",
+      "missing_evidence": "A model response that cites only these measured intervals ([85, 55]) and acknowledges the 0-day overdue gap would raise confidence from none.",
+      "signal_count": 3,
+      "timeline_window": "2026-03-18 to 2026-08-05",
+      "model_used": "rejected by validators (a refusal must report confidence 'none')",
+      "data_as_of": "2026-08-05",
+      "evidence_age_days": 54,
+      "evidence_staleness": "fresh",
+      "days_overdue": 0
+    }
+  },
+  "Tidewater Analytics": {
+    "verdicts": {
+      "A": "PASS",
+      "B": "PASS",
+      "C": "PASS",
+      "D": "PASS",
+      "E": "PASS"
+    },
+    "notes": {
+      "A": [],
+      "B": [],
+      "C": [],
+      "D": [],
+      "E": []
+    },
+    "read": {
+      "competitor": "Tidewater Analytics",
+      "patterns": "Insufficient evidence; only three signals (feature on 2026-02-04, messaging on 2026-05-13, pricing on 2026-08-06) and each transition observed once, no repeated ordering.",
+      "inferred_intent": "Cannot determine strategic intent due to lack of a repeatable pattern.",
+      "predicted_next_move": "No reliable prediction can be made at this time.",
+      "recommendation": "Continue monitoring Tidewater Analytics and collect additional signals, especially the next signal after the 2026-08-06 pricing move, to see if a repeat of the observed sequence emerges.",
+      "confidence": "none",
+      "missing_evidence": "A fourth signal that repeats a prior transition (e.g., another feature or pricing move) would enable pattern identification.",
+      "signal_count": 3,
+      "timeline_window": "2026-02-04 to 2026-08-06",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-08-06",
+      "evidence_age_days": 53,
+      "evidence_staleness": "fresh",
+      "days_overdue": 0
+    }
+  }
+}

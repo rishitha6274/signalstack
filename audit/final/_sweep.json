@@ -1,0 +1,112 @@
+[
+  {
+    "competitor": "Brightline Retail",
+    "confidence": "medium",
+    "signals": 7,
+    "overdue": 56,
+    "staleness": "stale",
+    "narrative_withheld": false,
+    "model_used": "openai/gpt-oss-120b",
+    "waited_on_429": false,
+    "seconds": 55.3
+  },
+  {
+    "competitor": "Corvus Data",
+    "confidence": "high",
+    "signals": 8,
+    "overdue": 0,
+    "staleness": "fresh",
+    "narrative_withheld": false,
+    "model_used": "openai/gpt-oss-120b",
+    "waited_on_429": false,
+    "seconds": 5.6
+  },
+  {
+    "competitor": "Ferrous Systems",
+    "confidence": "none",
+    "signals": 6,
+    "overdue": 0,
+    "staleness": "fresh",
+    "narrative_withheld": false,
+    "model_used": "openai/gpt-oss-120b",
+    "waited_on_429": false,
+    "seconds": 17.9
+  },
+  {
+    "competitor": "Halcyon Mobility",
+    "confidence": "high",
+    "signals": 8,
+    "overdue": 0,
+    "staleness": "fresh",
+    "narrative_withheld": false,
+    "model_used": "openai/gpt-oss-120b",
+    "waited_on_429": false,
+    "seconds": 19.5
+  },
+  {
+    "competitor": "Lumen Health",
+    "confidence": "low",
+    "signals": 9,
+    "overdue": 22,
+    "staleness": "aging",
+    "narrative_withheld": false,
+    "model_used": "openai/gpt-oss-120b",
+    "waited_on_429": false,
+    "seconds": 50.3
+  },
+  {
+    "competitor": "Nimbus AI",
+    "confidence": "low",
+    "signals": 12,
+    "overdue": 26,
+    "staleness": "stale",
+    "narrative_withheld": false,
+    "model_used": "openai/gpt-oss-120b",
+    "waited_on_429": false,
+    "seconds": 22.3
+  },
+  {
+    "competitor": "Palisade Security",
+    "confidence": "none",
+    "signals": 11,
+    "overdue": 0,
+    "staleness": "fresh",
+    "narrative_withheld": false,
+    "model_used": "openai/gpt-oss-120b",
+    "waited_on_429": false,
+    "seconds": 46.0
+  },
+  {
+    "competitor": "Pathfinder Labs",
+    "confidence": "none",
+    "signals": 3,
+    "overdue": 0,
+    "staleness": "fresh",
+    "narrative_withheld": false,
+    "model_used": "openai/gpt-oss-120b",
+    "waited_on_429": false,
+    "seconds": 11.6
+  },
+  {
+    "competitor": "Tidewater Analytics",
+    "confidence": "none",
+    "signals": 3,
+    "overdue": 0,
+    "staleness": "fresh",
+    "narrative_withheld": false,
+    "model_used": "openai/gpt-oss-120b",
+    "waited_on_429": false,
+    "seconds": 11.9
+  },
+  {
+    "competitor": "Vertex Cloud",
+    "confidence": "none",
+    "signals": 4,
+    "overdue": 0,
+    "staleness": "fresh",
+    "narrative_withheld": false,
+    "model_used": "openai/gpt-oss-120b",
+    "waited_on_429": false,
+    "seconds": 9.5
+  }
+]

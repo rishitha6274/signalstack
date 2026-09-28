@@ -1,0 +1,17 @@
+{
+  "competitor": "Halcyon Mobility",
+  "patterns": "We see a repeating feature→pricing transition: 2026-01-08 (feature) to 2026-02-17 (pricing) and again 2026-08-28 (feature) to 2026-09-22 (pricing). All other type changes (pricing→funding, funding→feature, feature→messaging, messaging→hiring, hiring→feature) appear only once.",
+  "inferred_intent": "Halcyon is rolling out new technical capabilities (features) and then quickly monetizing them through pricing shifts, using product upgrades to justify higher or new revenue models and to lock in commercial fleet customers.",
+  "predicted_next_move": "Announce a new funding round (e.g., Series D) by 2026-10-30, observable via a press release or regulatory filing.",
+  "recommendation": "Contact Halcyon's product and finance leadership this quarter to propose a joint grid‑services partnership before the expected funding announcement.",
+  "confidence": "high",
+  "missing_evidence": "A second observed pricing→funding transition would confirm the emerging pricing‑then‑funding cycle.",
+  "narrative_withheld": false,
+  "signal_count": 8,
+  "timeline_window": "2026-01-08 to 2026-09-22",
+  "model_used": "openai/gpt-oss-120b",
+  "data_as_of": "2026-09-22",
+  "evidence_age_days": 6,
+  "evidence_staleness": "fresh",
+  "days_overdue": 0
+}

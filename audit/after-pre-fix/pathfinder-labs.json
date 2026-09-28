@@ -1,0 +1,16 @@
+{
+  "competitor": "Pathfinder Labs",
+  "patterns": "3 signals recorded (1 feature, 1 messaging, 1 pricing). Measured intervals in days: [85, 55] — the median gap between consecutive signals is 70 days (range 55-85). The stream is within its usual rhythm, so this timeline is fresh. Narrative synthesis was generated twice and rejected by the application's validators (a refusal must report confidence 'none'), so it is withheld rather than shown unverified. The measurements above are exact.",
+  "inferred_intent": "Not inferred. The model did not produce a claim about intent that passed the evidence checks, and an unsupported intent is worse than none.",
+  "predicted_next_move": "Not predicted. The last signal is dated 2026-08-05 (54 day(s) ago).",
+  "recommendation": "Re-run the strategic read, or check the LLM response against the measured facts above: intervals [85, 55], median 70 days.",
+  "confidence": "none",
+  "missing_evidence": "A model response that cites only these measured intervals ([85, 55]) and acknowledges the 0-day overdue gap would raise confidence from none.",
+  "signal_count": 3,
+  "timeline_window": "2026-03-18 to 2026-08-05",
+  "model_used": "rejected by validators (a refusal must report confidence 'none')",
+  "data_as_of": "2026-08-05",
+  "evidence_age_days": 54,
+  "evidence_staleness": "fresh",
+  "days_overdue": 0
+}

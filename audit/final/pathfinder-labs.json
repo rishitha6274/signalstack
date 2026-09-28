@@ -1,0 +1,17 @@
+{
+  "competitor": "Pathfinder Labs",
+  "patterns": "Insufficient evidence: only three signals and each transition (feature→pricing, pricing→messaging) observed only once; no repeating sequence identified.",
+  "inferred_intent": "Cannot determine strategic intent due to lack of a repeatable pattern.",
+  "predicted_next_move": "No reliable prediction can be made at this time.",
+  "recommendation": "Continue monitoring Pathfinder Labs and record the next signal of any type; watch for whether a new signal repeats the pricing→messaging ordering.",
+  "confidence": "none",
+  "missing_evidence": "A fourth signal after 2026-08-05 (e.g., another feature, pricing, or messaging event) that would allow a repeatable transition to be observed.",
+  "narrative_withheld": false,
+  "signal_count": 3,
+  "timeline_window": "2026-03-18 to 2026-08-05",
+  "model_used": "openai/gpt-oss-120b",
+  "data_as_of": "2026-08-05",
+  "evidence_age_days": 54,
+  "evidence_staleness": "fresh",
+  "days_overdue": 0
+}

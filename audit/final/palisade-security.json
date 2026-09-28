@@ -1,0 +1,17 @@
+{
+  "competitor": "Palisade Security",
+  "patterns": "The timeline shows eleven signals but each type transition (e.g., feature→hiring, feature→messaging, etc.) occurs only once, as listed in the FACTS block; therefore no repeating ordering can be identified, making the evidence insufficient to define a pattern.",
+  "inferred_intent": "Insufficient evidence to determine a clear strategic intent.",
+  "predicted_next_move": "No reliable prediction can be made at this time.",
+  "recommendation": "Monitor upcoming signals and look for a repeat of any observed transition, such as a second feature→hiring event, to establish a pattern.",
+  "confidence": "none",
+  "missing_evidence": "A second occurrence of any specific signal‑type transition (e.g., another feature→hiring) would provide the repeat needed to confirm a pattern.",
+  "narrative_withheld": false,
+  "signal_count": 11,
+  "timeline_window": "2026-01-09 to 2026-09-25",
+  "model_used": "openai/gpt-oss-120b",
+  "data_as_of": "2026-09-25",
+  "evidence_age_days": 3,
+  "evidence_staleness": "fresh",
+  "days_overdue": 0
+}

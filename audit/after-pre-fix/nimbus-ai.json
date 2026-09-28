@@ -1,0 +1,16 @@
+{
+  "competitor": "Nimbus AI",
+  "patterns": "The only repeating transition is feature → hiring, observed twice: a feature release on 2026-03-11 (dark mode & CSV export) followed by four go‑to‑market hires on 2026-03-24, and a feature release on 2026-06-03 (SSO, SCIM, audit logs) followed by three strategic‑enterprise hires on 2026-06-24. Earlier there is a one‑off sequence pricing → pricing → messaging → feature (04‑15, 05‑06, 05‑20, 06‑03).",
+  "inferred_intent": "Nimbus AI is systematically building an enterprise‑ready go‑to‑market engine: funding enabled hiring spikes, product features (SSO, SCIM, audit logs) unlock enterprise contracts, pricing moves create a dedicated Enterprise tier, and messaging shifts reinforce the enterprise narrative.",
+  "predicted_next_move": "Release a new enterprise‑focused feature (e.g., advanced admin console or usage analytics) within the next 14 days (by 2026-10-12), which would be 26 days overdue relative to the 14‑day rhythm noted in the facts.",
+  "recommendation": "Develop a side‑by‑side feature comparison sheet and schedule outreach to prospects evaluating enterprise AI platforms, positioning our solution as a ready alternative before Nimbus’s next feature lands.",
+  "confidence": "low",
+  "missing_evidence": "A concrete feature‑release signal after today (e.g., an announcement of an enterprise admin capability) would most raise confidence in the forecast.",
+  "signal_count": 12,
+  "timeline_window": "2026-02-18 to 2026-08-19",
+  "model_used": "openai/gpt-oss-120b",
+  "data_as_of": "2026-08-19",
+  "evidence_age_days": 40,
+  "evidence_staleness": "stale",
+  "days_overdue": 26
+}

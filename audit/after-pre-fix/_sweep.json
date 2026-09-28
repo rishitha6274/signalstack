@@ -1,0 +1,92 @@
+[
+  {
+    "competitor": "Brightline Retail",
+    "confidence": "medium",
+    "signals": 7,
+    "overdue": 56,
+    "staleness": "stale",
+    "model_used": "openai/gpt-oss-120b",
+    "seconds": 7.7
+  },
+  {
+    "competitor": "Corvus Data",
+    "confidence": "high",
+    "signals": 8,
+    "overdue": 0,
+    "staleness": "fresh",
+    "model_used": "openai/gpt-oss-120b",
+    "seconds": 20.4
+  },
+  {
+    "competitor": "Ferrous Systems",
+    "confidence": "none",
+    "signals": 6,
+    "overdue": 0,
+    "staleness": "fresh",
+    "model_used": "openai/gpt-oss-120b",
+    "seconds": 24.1
+  },
+  {
+    "competitor": "Halcyon Mobility",
+    "confidence": "none",
+    "signals": 8,
+    "overdue": 0,
+    "staleness": "fresh",
+    "model_used": "rejected by validators (interval claim '30 days' does not correspond to any measured interval (real inte)",
+    "seconds": 55.7
+  },
+  {
+    "competitor": "Lumen Health",
+    "confidence": "none",
+    "signals": 9,
+    "overdue": 22,
+    "staleness": "aging",
+    "model_used": "rejected by validators (interval claim '7 days' does not correspond to any measured interval (real inter)",
+    "seconds": 55.7
+  },
+  {
+    "competitor": "Nimbus AI",
+    "confidence": "low",
+    "signals": 12,
+    "overdue": 26,
+    "staleness": "stale",
+    "model_used": "openai/gpt-oss-120b",
+    "seconds": 32.8
+  },
+  {
+    "competitor": "Palisade Security",
+    "confidence": "low",
+    "signals": 11,
+    "overdue": 0,
+    "staleness": "fresh",
+    "model_used": "openai/gpt-oss-120b",
+    "seconds": 56.6
+  },
+  {
+    "competitor": "Pathfinder Labs",
+    "confidence": "none",
+    "signals": 3,
+    "overdue": 0,
+    "staleness": "fresh",
+    "model_used": "rejected by validators (a refusal must report confidence 'none')",
+    "seconds": 50.7
+  },
+  {
+    "competitor": "Tidewater Analytics",
+    "confidence": "none",
+    "signals": 3,
+    "overdue": 0,
+    "staleness": "fresh",
+    "model_used": "openai/gpt-oss-120b",
+    "seconds": 18.4
+  },
+  {
+    "competitor": "Vertex Cloud",
+    "confidence": "none",
+    "signals": 4,
+    "overdue": 0,
+    "staleness": "fresh",
+    "model_used": "openai/gpt-oss-120b",
+    "seconds": 20.5
+  }
+]

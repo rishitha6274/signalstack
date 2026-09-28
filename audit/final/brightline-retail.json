@@ -1,0 +1,17 @@
+{
+  "competitor": "Brightline Retail",
+  "patterns": "The timeline shows a repeating three‑step cycle: feature → messaging → pricing. This sequence occurs twice: 2026-01-19 (feature) → 2026-02-16 (messaging) → 2026-03-16 (pricing) and 2026-04-13 (feature) → 2026-05-11 (messaging) → 2026-06-08 (pricing), followed by a third feature on 2026-07-06. All intervals are 28 days, matching the median of 28 days, and the stream is now 56 days overdue.",
+  "inferred_intent": "Brightline appears to be using a disciplined cadence to first introduce a functional capability (feature), then reshape market perception (messaging), and finally capture value (pricing), repeating this loop to deepen adoption and monetize new functionality.",
+  "predicted_next_move": "A messaging signal (e.g., a new positioning statement or rebranding announcement) is expected within the next 28 days, which would be 56 days overdue relative to the 28‑day rhythm.",
+  "recommendation": "Prepare a rapid‑response briefing and updated sales collateral that can be deployed this quarter if Brightline releases a new messaging announcement, so we can counter‑position our own offering promptly.",
+  "confidence": "medium",
+  "missing_evidence": "A post‑2026-09-28 messaging announcement from Brightline would most raise confidence in the predicted cycle.",
+  "narrative_withheld": false,
+  "signal_count": 7,
+  "timeline_window": "2026-01-19 to 2026-07-06",
+  "model_used": "openai/gpt-oss-120b",
+  "data_as_of": "2026-07-06",
+  "evidence_age_days": 84,
+  "evidence_staleness": "stale",
+  "days_overdue": 56
+}

@@ -1,0 +1,400 @@
+{
+  "Brightline Retail": {
+    "res": {
+      "A": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "B": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "C": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "D": {
+        "verdict": "FAIL",
+        "notes": [
+          "NO CONFIDENCE LABEL",
+          "NO \"what evidence is missing\" STATEMENT"
+        ]
+      },
+      "E": {
+        "verdict": "PASS",
+        "notes": []
+      }
+    },
+    "read": {
+      "competitor": "brightline-retail",
+      "patterns": "The timeline shows a strict ~28\u2011day cadence between signals: Jan\u202f19\u202f2026\u2192Feb\u202f16\u202f2026 (28\u202fd), Feb\u202f16\u2192Mar\u202f16\u202f2026 (29\u202fd), Mar\u202f16\u2192Apr\u202f13\u202f2026 (28\u202fd), Apr\u202f13\u2192May\u202f11\u202f2026 (28\u202fd), May\u202f11\u2192Jun\u202f08\u202f2026 (28\u202fd), Jun\u202f08\u2192Jul\u202f06\u202f2026 (28\u202fd). The signal types rotate in a three\u2011step cycle: Feature (Jan\u202f19), Messaging (Feb\u202f16), Pricing (Mar\u202f16), Feature (Apr\u202f13), Messaging (May\u202f11), Pricing (Jun\u202f08), Feature (Jul\u202f06). This suggests a recurring pattern of a feature launch, followed two weeks later by a messaging shift, then a pricing adjustment, repeating every ~28\u202fdays.",
+      "inferred_intent": "Brightline Retail appears to be deepening its value proposition from pure reporting toward end\u2011to\u2011end store execution and monetizing that shift. The feature releases (store\u2011level dashboard Jan\u202f19, demand forecasting Apr\u202f13, automated replenishment Jul\u202f06) expand functional coverage. The paired messaging updates (Feb\u202f16, May\u202f11) re\u2011position the product from \"shelf analytics\" to a \"decision tool\" and from a \"reporting tool\" to a \"decision tool,\" reinforcing the functional upgrades. The pricing moves (Mar\u202f16 per\u2011store pricing, Jun\u202f08 $4,800 annual minimum) lock larger customers into higher\u2011value contracts. Overall, the intent is to transition the product into a mandatory, high\u2011margin, store\u2011execution platform for multi\u2011site retailers.",
+      "predicted_next_move": "If the 28\u2011day, feature\u2011messaging\u2011pricing cycle holds, the next expected signal after the July\u202f06 feature is a messaging announcement roughly 28\u202fdays later. Assuming the pattern continues, Brightline Retail is likely to issue a new positioning or branding statement (e.g., emphasizing \"end\u2011to\u2011end store automation\" or a new value\u2011based tagline) by\u202f2026\u201110\u201115. Confirmation would be a press release, website banner, or blog post announcing the messaging shift; absence of such an announcement by that date would refute the prediction. Note: this forecast rests on a cadence that has not produced a signal since July\u202f06, so it is uncertain due to stale evidence.",
+      "recommendation": "Establish a weekly competitive\u2011intelligence alert (press releases, website updates, social media, analyst briefings) specifically for any Brightline Retail messaging or branding changes, and schedule an internal briefing by\u202f2026\u201110\u201115 to assess whether the predicted messaging shift occurs and to adjust our go\u2011to\u2011market positioning accordingly.",
+      "signal_count": 7,
+      "timeline_window": "2026-01-19 to 2026-07-06 (7 signals)",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-07-06",
+      "evidence_age_days": 84,
+      "evidence_staleness": "stale"
+    }
+  },
+  "Corvus Data": {
+    "res": {
+      "A": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "B": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "C": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "D": {
+        "verdict": "FAIL",
+        "notes": [
+          "NO CONFIDENCE LABEL",
+          "NO \"what evidence is missing\" STATEMENT"
+        ]
+      },
+      "E": {
+        "verdict": "PASS",
+        "notes": []
+      }
+    },
+    "read": {
+      "competitor": "corvus-data",
+      "patterns": "The timeline reveals a distinct 'Open-Core Monetization' sequence anchored by specific dates. First, a foundational open-source release (2026-02-19) established the community base. Second, a licensing dispute (2026-03-26) hardened their open-core stance. Third, the launch of a paid managed service (2026-05-07) initiated monetization. Fourth, significant hiring (2026-06-11) and feature gating (2026-07-16) scaled the paid tier. Fifth, compliance messaging (2026-08-20) targeted enterprise buyers. Finally, pricing optimization (2026-09-08) and advanced UI features (2026-09-24) refined the value proposition. The cadence is roughly 30-45 days between major strategic shifts, moving from product foundation to enterprise-ready paid service.",
+      "inferred_intent": "Corvus Data is executing a transition from an open-source project to an enterprise-focused SaaS business. The sequence of adding compliance certifications (2026-08-20) immediately before optimizing pricing (2026-09-08) and shipping enterprise-grade lineage tools (2026-09-24) indicates an intent to capture mid-to-large enterprise market share by removing procurement friction (compliance) and enhancing data governance capabilities (lineage) to justify the consumption-based pricing model.",
+      "predicted_next_move": "Within the next 30 days (by 2026-10-28), Corvus Data will announce a strategic partnership or integration with a major cloud provider (e.g., AWS, Azure, or GCP) to list their managed service in the respective marketplace. This is predicted because the compliance push (2026-08-20) and pricing flexibility (2026-09-08) are standard prerequisites for cloud marketplace listing, and the hiring of platform engineers (2026-06-11) suggests infrastructure readiness for multi-cloud deployment. Confirmation would be a press release or blog post announcing a marketplace listing or co-marketing agreement.",
+      "recommendation": "Audit our current enterprise compliance documentation and data lineage features against Corvus Data's newly highlighted SOC 2 Type II, ISO 27001, and column-level lineage capabilities (signals from 2026-08-20 and 2026-09-24). If we lack equivalent lineage UI or recent compliance badges, prioritize a quick-win marketing update to highlight our own compliance status and lineage features to prevent enterprise prospects from defaulting to Corvus Data based on these specific differentiators.",
+      "signal_count": 8,
+      "timeline_window": "2026-02-19 to 2026-09-24 (8 signals)",
+      "model_used": "qwen/qwen3.8-27b",
+      "data_as_of": "2026-09-24",
+      "evidence_age_days": 4,
+      "evidence_staleness": "fresh"
+    }
+  },
+  "Ferrous Systems": {
+    "res": {
+      "A": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "B": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "C": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "D": {
+        "verdict": "FAIL",
+        "notes": [
+          "NO CONFIDENCE LABEL",
+          "NO \"what evidence is missing\" STATEMENT"
+        ]
+      },
+      "E": {
+        "verdict": "PASS",
+        "notes": []
+      }
+    },
+    "read": {
+      "competitor": "ferrous-systems",
+      "patterns": "Ferrous Systems shows a ~42\u2011day cadence between public signals (Apr\u202f16 \u2192 May\u202f28 = 42\u202fd, May\u202f28 \u2192 Jul\u202f9 = 42\u202fd, Jul\u202f9 \u2192 Aug\u202f20 = 42\u202fd). The sequence moves from hardware\u2011centric actions (Feb\u202f5 feature, Jul\u202f9 fleet dashboard) to software\u2011centric messaging (Apr\u202f16, Sep\u202f16) and then to commercial levers (May\u202f28 RaaS pricing, Aug\u202f20 software hires). After each messaging shift they have introduced a commercial or product change (Apr\u202f16 messaging \u2192 May\u202f28 pricing; Sep\u202f16 messaging \u2192 predicted next commercial move). This suggests a deliberate, roughly six\u2011week rhythm of alternating messaging, product, and go\u2011to\u2011market signals.",
+      "inferred_intent": "The competitor is deliberately transitioning from a pure hardware play to a software\u2011as\u2011a\u2011service model: improved firmware (Feb\u202f5) \u2192 re\u2011framed value on failure handling (Apr\u202f16) \u2192 launched RaaS pricing (May\u202f28) \u2192 added a fleet\u2011management dashboard (Jul\u202f9) \u2192 hired software engineers (Aug\u202f20) \u2192 announced a software\u2011first roadmap and deprecation of the hardware configurator (Sep\u202f16). The intent is to build recurring revenue and lock customers into a cloud\u2011based services ecosystem.",
+      "predicted_next_move": "Within the next 6\u202fweeks (by 2026\u201111\u201110), Ferrous Systems will announce a new subscription tier or pricing adjustment for its RaaS offering, likely via a press release or blog post. Confirmation will be a public announcement that adds a tier (e.g., \u2018Enterprise\u2019 or \u2018Premium\u2019) to the existing monthly RaaS model; absence of such an announcement by that date refutes the prediction.",
+      "recommendation": "Assign a product lead this quarter to design a differentiated subscription tier for our own robotic services platform and prepare a launch announcement to be ready by early November 2026, so we can counter\u2011position against Ferrous's anticipated RaaS tier rollout.",
+      "signal_count": 6,
+      "timeline_window": "2026-02-05 to 2026-09-16 (6 signals)",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-09-16",
+      "evidence_age_days": 12,
+      "evidence_staleness": "fresh"
+    }
+  },
+  "Halcyon Mobility": {
+    "res": {
+      "A": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "B": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "C": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "D": {
+        "verdict": "FAIL",
+        "notes": [
+          "NO CONFIDENCE LABEL",
+          "NO \"what evidence is missing\" STATEMENT"
+        ]
+      },
+      "E": {
+        "verdict": "PASS",
+        "notes": []
+      }
+    },
+    "read": {
+      "competitor": "halcyon-mobility",
+      "patterns": "The timeline reveals a distinct 'Build-then-Monetize' cadence with a consistent ~38-day signal rhythm. Specifically, feature development consistently precedes pricing or commercialization moves by 2-3 months. For example, the fleet dashboard launched on 2026-05-06, followed by the commercial fleet tier pricing on 2026-09-22 (approx. 4.5 months later). Similarly, the demand-charge optimizer shipped on 2026-08-28, following the 'grid-aware charging' messaging shift on 2026-06-12. There is also a clear resource allocation shift: the $95M Series C on 2026-03-31 was followed by hiring field operations roles on 2026-07-21, indicating a move from pure software development to physical grid integration and fleet management.",
+      "inferred_intent": "Halcyon Mobility is transitioning from a consumer-focused charging network to a B2B commercial fleet and grid-integration platform. The intent is to capture value from utility tariff optimization and fleet management rather than just energy delivery. The shift from per-kWh fees (2026-02-17) to subscription (2026-02-17) and then to per-port pricing with utility-bill guarantees (2026-09-22) suggests they are trying to de-risk the customer's energy costs to lock in long-term commercial contracts, leveraging their new grid-integration software funded in March 2026.",
+      "predicted_next_move": "Within the next 38 days (by approximately 2026-11-05), Halcyon Mobility will announce a specific fleet partnership or a case study demonstrating a measurable reduction in utility bills for a commercial client. This is falsifiable: if no such partnership or case study is announced by 2026-11-05, the prediction is refuted. This follows the pattern of launching a feature (demand-charge optimizer on 2026-08-28) and then providing proof of value or commercial traction shortly after.",
+      "recommendation": "Immediately audit our current commercial fleet pricing model against Halcyon's 'utility-bill guarantee' structure launched on 2026-09-22. If our current model does not offer a similar risk-mitigation guarantee, develop a pilot program for our top 5 commercial accounts to test a guaranteed-cost tier before Halcyon's next signal (expected by 2026-11-05) solidifies their market position in fleet optimization.",
+      "signal_count": 8,
+      "timeline_window": "2026-01-08 to 2026-09-22 (8 signals)",
+      "model_used": "qwen/qwen3.8-27b",
+      "data_as_of": "2026-09-22",
+      "evidence_age_days": 6,
+      "evidence_staleness": "fresh"
+    }
+  },
+  "Lumen Health": {
+    "res": {
+      "A": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "B": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "C": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "D": {
+        "verdict": "FAIL",
+        "notes": [
+          "NO CONFIDENCE LABEL",
+          "NO \"what evidence is missing\" STATEMENT"
+        ]
+      },
+      "E": {
+        "verdict": "PASS",
+        "notes": []
+      }
+    },
+    "read": {
+      "competitor": "lumen-health",
+      "patterns": "The timeline shows a roughly monthly cadence (\u224830\u201145\u202fdays) with alternating product\u2011focused and go\u2011to\u2011market signals. After the Series\u202fB funding on 2026\u201103\u201117 they added compliance and security hires on 2026\u201104\u201108, then shipped audit\u2011logging/BAA tooling on 2026\u201104\u201129 (\u22483\u202fweeks later). After the messaging shift on 2026\u201105\u201127 they changed pricing to per\u2011bed on 2026\u201106\u201123 (\u22484\u202fweeks later). After hiring implementation/EHR engineers on 2026\u201107\u201114 they released HL7/FHIR bulk sync GA on 2026\u201108\u201111 (\u22484\u202fweeks later). This repeat of a go\u2011to\u2011market move followed by a related product feature within 4\u20116\u202fweeks constitutes a clear pattern.",
+      "inferred_intent": "Lumen Health is deliberately moving from a clinician\u2011centric AI narrative to a hospital\u2011IT platform strategy. The funding round (2026\u201103\u201117) funded HIPAA/compliance engineering and a hospital sales team, the subsequent compliance hires and tooling (2026\u201104\u201108, 2026\u201104\u201129) address security concerns of health systems. The rebranding to \u2018Built for hospital IT\u2019 (2026\u201105\u201127) and per\u2011bed pricing (2026\u201106\u201123) align the product with how health systems buy. Hiring implementation and EHR integration engineers (2026\u201107\u201114) and delivering HL7/FHIR bulk sync (2026\u201108\u201111) deepen technical integration, positioning Lumen as a turnkey documentation solution for health\u2011system procurement cycles.",
+      "predicted_next_move": "Based on the observed 4\u20116\u202fweek lag between a product release and a subsequent go\u2011to\u2011market signal, Lumen Health is likely to issue a hospital\u2011IT focused public announcement (e.g., a partnership with a major EHR vendor or a refreshed messaging campaign emphasizing \u2018Seamless EHR integration for health systems\u2019) by early October\u202f2026 (no later than 2026\u201110\u201110). Confirmation would be a press release, blog post, or website banner; absence of such an announcement by that date would refute the prediction.",
+      "recommendation": "Assign a competitive\u2011intelligence analyst to monitor Lumen Health\u2019s press releases, blog updates, and job boards weekly for any partnership or messaging announcement through early October, and prepare a rapid\u2011response positioning brief that highlights our own EHR integration strengths to be ready for deployment if the predicted announcement occurs.",
+      "signal_count": 9,
+      "timeline_window": "2026-01-14 to 2026-08-11 (9 signals)",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-08-11",
+      "evidence_age_days": 48,
+      "evidence_staleness": "aging"
+    }
+  },
+  "Nimbus AI": {
+    "res": {
+      "A": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "B": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "C": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "D": {
+        "verdict": "FAIL",
+        "notes": [
+          "NO CONFIDENCE LABEL",
+          "NO \"what evidence is missing\" STATEMENT"
+        ]
+      },
+      "E": {
+        "verdict": "PASS",
+        "notes": []
+      }
+    },
+    "read": {
+      "competitor": "nimbus-ai",
+      "patterns": "Nimbus AI follows a roughly 2\u20114\u2011week cadence of cross\u2011type moves that progress from go\u2011to\u2011market hiring \u2192 pricing adjustments \u2192 messaging shift \u2192 enterprise\u2011focused feature rollout. Example: hiring (2026-03-05, 2026-03-24) \u2192 price cut (2026-04-15) \u2192 volume discount (2026-05-06) \u2192 enterprise messaging (2026-05-20) \u2192 SSO/SCIM feature (2026-06-03) \u2192 strategic\u2011enterprise hiring (2026-06-24) \u2192 enterprise\u2011focused campaign (2026-07-15) \u2192 Enterprise tier pricing (2026-08-19). The intervals between these signals average 14\u201121 days, indicating a deliberate sequencing rather than ad\u2011hoc actions.",
+      "inferred_intent": "The sequence shows a clear strategic intent to transition from a self\u2011serve, low\u2011price model to an enterprise\u2011ready offering: use the Series C funding to bulk\u2011hire sales/solution roles, lower entry pricing to grow user base, then introduce volume discounts to push larger contracts, rebrand messaging toward enterprises, ship security/identity features that enterprises demand, and finally launch a dedicated Enterprise tier. The overall goal is to capture mid\u2011market and large\u2011enterprise customers and increase ARR per customer.",
+      "predicted_next_move": "Within the next two weeks (by 2026-10-12) Nimbus AI will announce a new enterprise\u2011admin feature set (e.g., usage analytics dashboard with role\u2011based access controls) on its blog or press release. Confirmation will be a public announcement of such feature; absence of any enterprise\u2011feature announcement by that date falsifies the prediction.",
+      "recommendation": "Deploy a dedicated monitoring sprint this quarter: assign an analyst to track Nimbus AI\u2019s product blog, press releases, and job postings daily, and trigger an internal brief if any enterprise\u2011admin feature or related announcement appears before 2026-10-12, so we can adjust our own go\u2011to\u2011market tactics accordingly.",
+      "signal_count": 12,
+      "timeline_window": "2026-02-18 to 2026-08-19 (12 signals)",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-08-19",
+      "evidence_age_days": 40,
+      "evidence_staleness": "stale"
+    }
+  },
+  "Palisade Security": {
+    "res": {
+      "A": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "B": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "C": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "D": {
+        "verdict": "FAIL",
+        "notes": [
+          "NO CONFIDENCE LABEL",
+          "NO \"what evidence is missing\" STATEMENT"
+        ]
+      },
+      "E": {
+        "verdict": "PASS",
+        "notes": []
+      }
+    },
+    "read": {
+      "competitor": "palisade-security",
+      "patterns": "The timeline shows a roughly 4\u20116 week cadence where Palisade alternates between product/compliance features, hiring pushes, pricing adjustments, and messaging shifts. Notable sequence: funding on 2026-02-27 was followed by a hiring wave on 2026-03-20, then a new MDR feature on 2026-04-17, a pricing bundle on 2026-05-22, a messaging refresh on 2026-06-19, a FedRAMP feature on 2026-07-24, a federal\u2011account hiring push on 2026-08-14, a federal\u2011tier pricing launch on 2026-09-05, and a sovereign\u2011cloud feature on 2026-09-25. This pattern of a feature \u2192 hiring \u2192 pricing (or messaging) cycle repeats three times, indicating a coordinated go\u2011to\u2011market rollout cadence.",
+      "inferred_intent": "The coordinated sequence points to a strategic push into the regulated and public\u2011sector market: first securing compliance credentials (FedRAMP on 2026-07-24, sovereign cloud on 2026-09-25), then building dedicated sales/engineering capacity (2026-08-14 hiring), and finally monetizing the capability with tailored pricing (2026-09-05 federal tier). The messaging shift on 2026-06-19 to \"from tools to outcomes\" reinforces a move from a generic security platform to a compliance\u2011focused, outcome\u2011driven value proposition for government and EU customers.",
+      "predicted_next_move": "Within the next three weeks (by 2026-10-19) Palisade Security will publish at least two new job listings for European public\u2011sector sales or data\u2011residency engineering roles, signaling a hiring wave to support the Frankfurt sovereign\u2011cloud region announced on 2026-09-25.",
+      "recommendation": "Set up a real\u2011time alert on Palisade Security\u2019s careers page and LinkedIn for EU\u2011focused sales or engineering positions and, once identified, proactively engage our EU public\u2011sector prospects with a differentiated compliance and sovereign\u2011cloud offering before Palisade\u2019s new hires can be deployed.",
+      "signal_count": 11,
+      "timeline_window": "2026-01-09 to 2026-09-25 (11 signals)",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-09-25",
+      "evidence_age_days": 3,
+      "evidence_staleness": "fresh"
+    }
+  },
+  "Pathfinder Labs": {
+    "res": {
+      "A": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "B": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "C": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "D": {
+        "verdict": "FAIL",
+        "notes": [
+          "NO CONFIDENCE LABEL",
+          "NO \"what evidence is missing\" STATEMENT"
+        ]
+      },
+      "E": {
+        "verdict": "PASS",
+        "notes": []
+      }
+    },
+    "read": {
+      "competitor": "pathfinder-labs",
+      "patterns": "Evidence insufficient: only three signals (2026-03-18 feature, 2026-06-11 pricing, 2026-08-05 messaging). At least four signals are needed to identify recurring cadence or sequence across types.",
+      "inferred_intent": "Cannot determine strategic intent due to insufficient signal count; more data required.",
+      "predicted_next_move": "No reliable prediction can be made. A prediction would require at least one additional distinct signal (e.g., hiring, funding, or another feature release) to establish a pattern.",
+      "recommendation": "Continue systematic monitoring of Pathfinder Labs for new signals across all categories (feature, pricing, hiring, funding, messaging) and set up real\u2011time alerts; prioritize detecting any announcement within the next month.",
+      "signal_count": 3,
+      "timeline_window": "2026-03-18 to 2026-08-05 (3 signals)",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-08-05",
+      "evidence_age_days": 54,
+      "evidence_staleness": "fresh"
+    }
+  },
+  "Tidewater Analytics": {
+    "res": {
+      "A": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "B": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "C": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "D": {
+        "verdict": "FAIL",
+        "notes": [
+          "NO CONFIDENCE LABEL"
+        ]
+      },
+      "E": {
+        "verdict": "PASS",
+        "notes": []
+      }
+    },
+    "read": {
+      "competitor": "tidewater-analytics",
+      "patterns": "Insufficient evidence: only three signals (feature on 2026-02-04, messaging on 2026-05-13, pricing on 2026-08-06) are present; a minimum of four signals is required to identify recurring patterns or cadence.",
+      "inferred_intent": "Cannot infer strategic intent due to insufficient number of signals; need additional signals across types to discern intent.",
+      "predicted_next_move": "No reliable prediction can be made at this time. Additional signals (e.g., a new feature, pricing change, hiring announcement, or funding event) are needed to establish a pattern before forecasting a specific action.",
+      "recommendation": "Continue monitoring Tidewater Analytics and collect further signals across feature, pricing, messaging, hiring, and funding categories; prioritize detecting any new announcements within the next month to reach the four\u2011signal threshold for analysis.",
+      "signal_count": 3,
+      "timeline_window": "2026-02-04 to 2026-08-06 (3 signals)",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-08-06",
+      "evidence_age_days": 53,
+      "evidence_staleness": "fresh"
+    }
+  },
+  "Vertex Cloud": {
+    "res": {
+      "A": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "B": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "C": {
+        "verdict": "PASS",
+        "notes": []
+      },
+      "D": {
+        "verdict": "FAIL",
+        "notes": [
+          "NO CONFIDENCE LABEL"
+        ]
+      },
+      "E": {
+        "verdict": "PASS",
+        "notes": []
+      }
+    },
+    "read": {
+      "competitor": "vertex-cloud",
+      "patterns": "Evidence insufficient to identify a recurring cadence or ordering; only a single sequence of four heterogeneous signals (feature, pricing, messaging, feature) is present, which does not repeat.",
+      "inferred_intent": "Cannot determine a strategic intent with confidence because the signal set does not show a repeatable pattern or clear sequencing.",
+      "predicted_next_move": "No concrete prediction can be made at this time; additional signals (e.g., another pricing change, feature rollout, or messaging shift) are needed to establish a repeatable pattern before forecasting a specific action.",
+      "recommendation": "Maintain weekly competitive monitoring of Vertex Cloud and log any new announcements, especially pricing or feature updates, to gather enough data for pattern detection before taking strategic actions.",
+      "signal_count": 4,
+      "timeline_window": "2026-01-22 to 2026-08-12 (4 signals)",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-08-12",
+      "evidence_age_days": 47,
+      "evidence_staleness": "fresh"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "competitor": "Nimbus AI",
+  "patterns": "The only transition that repeats is Feature → Hiring (observed on 2026-03-11 → 2026-03-24 and on 2026-06-03 → 2026-06-24). Earlier signals show a one‑off sequence Funding → Messaging (02‑18 → 02‑27), Messaging → Hiring (02‑27 → 03‑05), Hiring → Feature (03‑05 → 03‑11), Hiring → Pricing (03‑24 → 04‑15), Pricing → Pricing (04‑15 → 05‑06), Pricing → Messaging (05‑06 → 05‑20), Messaging → Feature (05‑20 → 06‑03), Hiring → Messaging (06‑24 → 07‑15), Messaging → Pricing (07‑15 → 08‑19). Overall the timeline moves from a self‑serve focus to enterprise‑ready messaging, pricing, and hiring.",
+  "inferred_intent": "Nimbus AI is shifting up‑market: using the Series C to build an enterprise go‑to‑market engine, adjusting pricing to attract larger contracts, and signaling enterprise readiness through messaging and product features.",
+  "predicted_next_move": "Given the overdue 26‑day lag on the 14‑day rhythm, the next likely signal is a new enterprise‑focused feature release (e.g., enhanced SSO/SCIM or audit capabilities) announced by 2026-10-12, which would be 14 days from today and 26 days past the expected cadence.",
+  "recommendation": "Launch a targeted outreach campaign this quarter highlighting our own enterprise compliance and security features to win prospects that Nimbus AI is courting with its upcoming enterprise tier.",
+  "confidence": "low",
+  "missing_evidence": "A concrete feature announcement after 2026-09-28 would confirm the predicted enterprise‑feature move.",
+  "narrative_withheld": false,
+  "signal_count": 12,
+  "timeline_window": "2026-02-18 to 2026-08-19",
+  "model_used": "openai/gpt-oss-120b",
+  "data_as_of": "2026-08-19",
+  "evidence_age_days": 40,
+  "evidence_staleness": "stale",
+  "days_overdue": 26
+}

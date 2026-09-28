@@ -1,0 +1,16 @@
+{
+  "competitor": "Corvus Data",
+  "patterns": "A repeating three‑step sequence appears: feature → messaging → pricing. First cycle: 2026-02-19 (feature) → 2026-03-26 (messaging) → 2026-05-07 (pricing). Second cycle: 2026-07-16 (feature) → 2026-08-20 (messaging) → 2026-09-08 (pricing). Both cycles follow the median interval of 35 days between signals (FACTS). Other transitions (pricing→hiring, hiring→feature, pricing→feature) occur only once.",
+  "inferred_intent": "Corvus Data is systematically rolling out product enhancements, then amplifying them with targeted messaging, and finally adjusting pricing to capture revenue from the managed service, indicating a coordinated go‑to‑market push for its cloud offering.",
+  "predicted_next_move": "A messaging announcement (e.g., blog post, press release, or compliance highlight) about the new column‑level lineage UI is expected by 2026-10-30, roughly 35 days after the 2026-09-24 feature signal.",
+  "recommendation": "Prepare a competitive briefing and a counter‑marketing message that emphasizes our own lineage capabilities, to be deployed before the anticipated October announcement.",
+  "confidence": "high",
+  "missing_evidence": "A messaging signal occurring after 2026-09-24 would confirm the recurring feature→messaging→pricing cycle.",
+  "signal_count": 8,
+  "timeline_window": "2026-02-19 to 2026-09-24",
+  "model_used": "openai/gpt-oss-120b",
+  "data_as_of": "2026-09-24",
+  "evidence_age_days": 4,
+  "evidence_staleness": "fresh",
+  "days_overdue": 0
+}

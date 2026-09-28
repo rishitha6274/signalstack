@@ -1,0 +1,16 @@
+{
+  "competitor": "Ferrous Systems",
+  "patterns": "Insufficient evidence to identify a repeating pattern; only single-instance transitions observed (e.g., feature→hiring on 2026-08-20, hiring→messaging on 2026-09-16). A second occurrence of any transition would be needed.",
+  "inferred_intent": "Cannot determine strategic intent due to lack of repeated sequence.",
+  "predicted_next_move": "No reliable prediction can be made at this time.",
+  "recommendation": "Continue monitoring Ferrous Systems and collect additional signals, especially watching for a repeat of any transition (e.g., another feature→hiring or pricing→feature) within the next 30 days.",
+  "confidence": "none",
+  "missing_evidence": "A second occurrence of any observed transition (e.g., another feature→hiring) would allow pattern identification.",
+  "signal_count": 6,
+  "timeline_window": "2026-02-05 to 2026-09-16",
+  "model_used": "openai/gpt-oss-120b",
+  "data_as_of": "2026-09-16",
+  "evidence_age_days": 12,
+  "evidence_staleness": "fresh",
+  "days_overdue": 0
+}

@@ -1,0 +1,16 @@
+{
+  "competitor": "Halcyon Mobility",
+  "patterns": "8 signals recorded (3 feature, 1 funding, 1 hiring, 1 messaging, 2 pricing). Measured intervals in days: [40, 42, 36, 37, 39, 38, 25] — the median gap between consecutive signals is 38 days (range 25-42). The stream is within its usual rhythm, so this timeline is fresh. Narrative synthesis was generated twice and rejected by the application's validators (interval claim '30 days' does not correspond to any measured interval (real intervals: [40, 42, 36, 37, 39, 38, 25], median 38)), so it is withheld rather than shown unverified. The measurements above are exact.",
+  "inferred_intent": "Not inferred. The model did not produce a claim about intent that passed the evidence checks, and an unsupported intent is worse than none.",
+  "predicted_next_move": "Not predicted. The last signal is dated 2026-09-22 (6 day(s) ago).",
+  "recommendation": "Re-run the strategic read, or check the LLM response against the measured facts above: intervals [40, 42, 36, 37, 39, 38, 25], median 38 days.",
+  "confidence": "none",
+  "missing_evidence": "A model response that cites only these measured intervals ([40, 42, 36, 37, 39, 38, 25]) and acknowledges the 0-day overdue gap would raise confidence from none.",
+  "signal_count": 8,
+  "timeline_window": "2026-01-08 to 2026-09-22",
+  "model_used": "rejected by validators (interval claim '30 days' does not correspond to any measured interval (real inte)",
+  "data_as_of": "2026-09-22",
+  "evidence_age_days": 6,
+  "evidence_staleness": "fresh",
+  "days_overdue": 0
+}

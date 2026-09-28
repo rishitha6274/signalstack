@@ -1,0 +1,332 @@
+{
+  "Nimbus AI": {
+    "verdicts": {
+      "A": "PASS",
+      "B": "PASS",
+      "C": "PASS",
+      "D": "PASS",
+      "E": "PASS"
+    },
+    "notes": {
+      "A": [],
+      "B": [],
+      "C": [],
+      "D": [],
+      "E": []
+    },
+    "read": {
+      "competitor": "Nimbus AI",
+      "patterns": "The only transition that repeats is Feature \u2192 Hiring (observed on 2026-03-11 \u2192 2026-03-24 and on 2026-06-03 \u2192 2026-06-24). Earlier signals show a one\u2011off sequence Funding \u2192 Messaging (02\u201118 \u2192 02\u201127), Messaging \u2192 Hiring (02\u201127 \u2192 03\u201105), Hiring \u2192 Feature (03\u201105 \u2192 03\u201111), Hiring \u2192 Pricing (03\u201124 \u2192 04\u201115), Pricing \u2192 Pricing (04\u201115 \u2192 05\u201106), Pricing \u2192 Messaging (05\u201106 \u2192 05\u201120), Messaging \u2192 Feature (05\u201120 \u2192 06\u201103), Hiring \u2192 Messaging (06\u201124 \u2192 07\u201115), Messaging \u2192 Pricing (07\u201115 \u2192 08\u201119). Overall the timeline moves from a self\u2011serve focus to enterprise\u2011ready messaging, pricing, and hiring.",
+      "inferred_intent": "Nimbus AI is shifting up\u2011market: using the Series C to build an enterprise go\u2011to\u2011market engine, adjusting pricing to attract larger contracts, and signaling enterprise readiness through messaging and product features.",
+      "predicted_next_move": "Given the overdue 26\u2011day lag on the 14\u2011day rhythm, the next likely signal is a new enterprise\u2011focused feature release (e.g., enhanced SSO/SCIM or audit capabilities) announced by 2026-10-12, which would be 14 days from today and 26 days past the expected cadence.",
+      "recommendation": "Launch a targeted outreach campaign this quarter highlighting our own enterprise compliance and security features to win prospects that Nimbus AI is courting with its upcoming enterprise tier.",
+      "confidence": "low",
+      "missing_evidence": "A concrete feature announcement after 2026-09-28 would confirm the predicted enterprise\u2011feature move.",
+      "narrative_withheld": false,
+      "signal_count": 12,
+      "timeline_window": "2026-02-18 to 2026-08-19",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-08-19",
+      "evidence_age_days": 40,
+      "evidence_staleness": "stale",
+      "days_overdue": 26
+    }
+  },
+  "Palisade Security": {
+    "verdicts": {
+      "A": "PASS",
+      "B": "PASS",
+      "C": "PASS",
+      "D": "PASS",
+      "E": "PASS"
+    },
+    "notes": {
+      "A": [],
+      "B": [],
+      "C": [],
+      "D": [],
+      "E": []
+    },
+    "read": {
+      "competitor": "Palisade Security",
+      "patterns": "The timeline shows eleven signals but each type transition (e.g., feature\u2192hiring, feature\u2192messaging, etc.) occurs only once, as listed in the FACTS block; therefore no repeating ordering can be identified, making the evidence insufficient to define a pattern.",
+      "inferred_intent": "Insufficient evidence to determine a clear strategic intent.",
+      "predicted_next_move": "No reliable prediction can be made at this time.",
+      "recommendation": "Monitor upcoming signals and look for a repeat of any observed transition, such as a second feature\u2192hiring event, to establish a pattern.",
+      "confidence": "none",
+      "missing_evidence": "A second occurrence of any specific signal\u2011type transition (e.g., another feature\u2192hiring) would provide the repeat needed to confirm a pattern.",
+      "narrative_withheld": false,
+      "signal_count": 11,
+      "timeline_window": "2026-01-09 to 2026-09-25",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-09-25",
+      "evidence_age_days": 3,
+      "evidence_staleness": "fresh",
+      "days_overdue": 0
+    }
+  },
+  "Lumen Health": {
+    "verdicts": {
+      "A": "PASS",
+      "B": "PASS",
+      "C": "PASS",
+      "D": "PASS",
+      "E": "PASS"
+    },
+    "notes": {
+      "A": [],
+      "B": [],
+      "C": [],
+      "D": [],
+      "E": []
+    },
+    "read": {
+      "competitor": "Lumen Health",
+      "patterns": "A repeating hiring\u2192feature transition is observed: hiring on 2026-04-08 followed by a feature on 2026-04-29 (interval 21 days), and hiring on 2026-07-14 followed by a feature on 2026-08-11 (interval 28 days). This hiring\u2011then\u2011feature pattern occurs twice.",
+      "inferred_intent": "Lumen Health appears to be strengthening its hospital\u2011IT product stack by hiring specialized compliance, security, and integration staff and then delivering new technical capabilities (audit logging, HL7/FHIR bulk sync) to appeal to health\u2011system buyers.",
+      "predicted_next_move": "Because the stream is 22 days past its 26\u2011day rhythm, Lumen Health is likely to issue a new hiring announcement (e.g., additional implementation or EHR\u2011integration engineering roles) between 2026-09-28 and 2026-10-20, which would resolve the overdue cadence.",
+      "recommendation": "Contact Lumen Health's recruiting or talent acquisition team this quarter to offer our recruiting\u2011as\u2011a\u2011service platform as a partner for the anticipated implementation/EHR\u2011integration hires.",
+      "confidence": "low",
+      "missing_evidence": "A second observed feature\u2192hiring transition would most increase confidence in the predicted hiring move.",
+      "narrative_withheld": false,
+      "signal_count": 9,
+      "timeline_window": "2026-01-14 to 2026-08-11",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-08-11",
+      "evidence_age_days": 48,
+      "evidence_staleness": "aging",
+      "days_overdue": 22
+    }
+  },
+  "Corvus Data": {
+    "verdicts": {
+      "A": "PASS",
+      "B": "PASS",
+      "C": "PASS",
+      "D": "PASS",
+      "E": "PASS"
+    },
+    "notes": {
+      "A": [],
+      "B": [],
+      "C": [],
+      "D": [],
+      "E": []
+    },
+    "read": {
+      "competitor": "Corvus Data",
+      "patterns": "Repeating transitions: feature\u2192messaging occurred on 2026-02-19\u21922026-03-26 and 2026-07-16\u21922026-08-20; messaging\u2192pricing occurred on 2026-03-26\u21922026-05-07 and 2026-08-20\u21922026-09-08. A single pricing\u2192feature step was seen on 2026-09-08\u21922026-09-24.",
+      "inferred_intent": "Corvus Data appears to introduce a product capability (feature), then use messaging to emphasize compliance/licensing (messaging), and shortly after adjust pricing to monetize the new capability (pricing), indicating a strategy to grow enterprise revenue and lock\u2011in customers.",
+      "predicted_next_move": "A messaging announcement (e.g., new compliance certification or open\u2011core licence reaffirmation) is expected around 2026-10-25 to 2026-10-31, observable as a blog post, press release or website update.",
+      "recommendation": "Draft and schedule a counter\u2011messaging brief highlighting our own SOC\u202f2/ISO\u202f27001 compliance and more flexible pricing, and begin outreach to shared prospects before the anticipated late\u2011October announcement.",
+      "confidence": "high",
+      "missing_evidence": "A messaging signal dated within ~35\u202fdays after 2026-09-24 would confirm the recurring feature\u2192messaging cycle.",
+      "narrative_withheld": false,
+      "signal_count": 8,
+      "timeline_window": "2026-02-19 to 2026-09-24",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-09-24",
+      "evidence_age_days": 4,
+      "evidence_staleness": "fresh",
+      "days_overdue": 0
+    }
+  },
+  "Halcyon Mobility": {
+    "verdicts": {
+      "A": "PASS",
+      "B": "PASS",
+      "C": "PASS",
+      "D": "PASS",
+      "E": "PASS"
+    },
+    "notes": {
+      "A": [],
+      "B": [],
+      "C": [],
+      "D": [],
+      "E": []
+    },
+    "read": {
+      "competitor": "Halcyon Mobility",
+      "patterns": "We see a repeating feature\u2192pricing transition: 2026-01-08 (feature) to 2026-02-17 (pricing) and again 2026-08-28 (feature) to 2026-09-22 (pricing). All other type changes (pricing\u2192funding, funding\u2192feature, feature\u2192messaging, messaging\u2192hiring, hiring\u2192feature) appear only once.",
+      "inferred_intent": "Halcyon is rolling out new technical capabilities (features) and then quickly monetizing them through pricing shifts, using product upgrades to justify higher or new revenue models and to lock in commercial fleet customers.",
+      "predicted_next_move": "Announce a new funding round (e.g., Series D) by 2026-10-30, observable via a press release or regulatory filing.",
+      "recommendation": "Contact Halcyon's product and finance leadership this quarter to propose a joint grid\u2011services partnership before the expected funding announcement.",
+      "confidence": "high",
+      "missing_evidence": "A second observed pricing\u2192funding transition would confirm the emerging pricing\u2011then\u2011funding cycle.",
+      "narrative_withheld": false,
+      "signal_count": 8,
+      "timeline_window": "2026-01-08 to 2026-09-22",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-09-22",
+      "evidence_age_days": 6,
+      "evidence_staleness": "fresh",
+      "days_overdue": 0
+    }
+  },
+  "Brightline Retail": {
+    "verdicts": {
+      "A": "PASS",
+      "B": "PASS",
+      "C": "PASS",
+      "D": "PASS",
+      "E": "PASS"
+    },
+    "notes": {
+      "A": [],
+      "B": [],
+      "C": [],
+      "D": [],
+      "E": []
+    },
+    "read": {
+      "competitor": "Brightline Retail",
+      "patterns": "The timeline shows a repeating three\u2011step cycle: feature \u2192 messaging \u2192 pricing. This sequence occurs twice: 2026-01-19 (feature) \u2192 2026-02-16 (messaging) \u2192 2026-03-16 (pricing) and 2026-04-13 (feature) \u2192 2026-05-11 (messaging) \u2192 2026-06-08 (pricing), followed by a third feature on 2026-07-06. All intervals are 28 days, matching the median of 28 days, and the stream is now 56 days overdue.",
+      "inferred_intent": "Brightline appears to be using a disciplined cadence to first introduce a functional capability (feature), then reshape market perception (messaging), and finally capture value (pricing), repeating this loop to deepen adoption and monetize new functionality.",
+      "predicted_next_move": "A messaging signal (e.g., a new positioning statement or rebranding announcement) is expected within the next 28 days, which would be 56 days overdue relative to the 28\u2011day rhythm.",
+      "recommendation": "Prepare a rapid\u2011response briefing and updated sales collateral that can be deployed this quarter if Brightline releases a new messaging announcement, so we can counter\u2011position our own offering promptly.",
+      "confidence": "medium",
+      "missing_evidence": "A post\u20112026-09-28 messaging announcement from Brightline would most raise confidence in the predicted cycle.",
+      "narrative_withheld": false,
+      "signal_count": 7,
+      "timeline_window": "2026-01-19 to 2026-07-06",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-07-06",
+      "evidence_age_days": 84,
+      "evidence_staleness": "stale",
+      "days_overdue": 56
+    }
+  },
+  "Ferrous Systems": {
+    "verdicts": {
+      "A": "PASS",
+      "B": "PASS",
+      "C": "PASS",
+      "D": "PASS",
+      "E": "PASS"
+    },
+    "notes": {
+      "A": [],
+      "B": [],
+      "C": [],
+      "D": [],
+      "E": []
+    },
+    "read": {
+      "competitor": "Ferrous Systems",
+      "patterns": "Evidence insufficient; no repeating transition observed. Need a repeated transition between signal types to establish a pattern.",
+      "inferred_intent": "Insufficient evidence to determine strategic intent.",
+      "predicted_next_move": "No reliable prediction can be made at this time.",
+      "recommendation": "Continue monitoring Ferrous Systems signals, especially for a repeat of any specific transition such as pricing\u2192feature or feature\u2192messaging, to enable pattern detection.",
+      "confidence": "none",
+      "missing_evidence": "A second occurrence of any specific transition (e.g., pricing\u2192feature) would confirm a repeatable pattern.",
+      "narrative_withheld": false,
+      "signal_count": 6,
+      "timeline_window": "2026-02-05 to 2026-09-16",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-09-16",
+      "evidence_age_days": 12,
+      "evidence_staleness": "fresh",
+      "days_overdue": 0
+    }
+  },
+  "Vertex Cloud": {
+    "verdicts": {
+      "A": "PASS",
+      "B": "PASS",
+      "C": "PASS",
+      "D": "PASS",
+      "E": "PASS"
+    },
+    "notes": {
+      "A": [],
+      "B": [],
+      "C": [],
+      "D": [],
+      "E": []
+    },
+    "read": {
+      "competitor": "Vertex Cloud",
+      "patterns": "Evidence insufficient: only single instances of each transition (feature\u2192pricing on 2026-01-22\u21922026-04-08, pricing\u2192messaging on 2026-04-08\u21922026-06-30, messaging\u2192feature on 2026-06-30\u21922026-08-12) and no repeating pattern.",
+      "inferred_intent": "Insufficient evidence to infer a strategic intent.",
+      "predicted_next_move": "No reliable prediction can be made at this time.",
+      "recommendation": "Continue monitoring Vertex Cloud signals and specifically watch for a repeat of the pricing\u2192messaging\u2192feature sequence.",
+      "confidence": "none",
+      "missing_evidence": "A second occurrence of the pricing\u2192messaging\u2192feature sequence would confirm a recurring pattern.",
+      "narrative_withheld": false,
+      "signal_count": 4,
+      "timeline_window": "2026-01-22 to 2026-08-12",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-08-12",
+      "evidence_age_days": 47,
+      "evidence_staleness": "fresh",
+      "days_overdue": 0
+    }
+  },
+  "Pathfinder Labs": {
+    "verdicts": {
+      "A": "PASS",
+      "B": "PASS",
+      "C": "PASS",
+      "D": "PASS",
+      "E": "PASS"
+    },
+    "notes": {
+      "A": [],
+      "B": [],
+      "C": [],
+      "D": [],
+      "E": []
+    },
+    "read": {
+      "competitor": "Pathfinder Labs",
+      "patterns": "Insufficient evidence: only three signals and each transition (feature\u2192pricing, pricing\u2192messaging) observed only once; no repeating sequence identified.",
+      "inferred_intent": "Cannot determine strategic intent due to lack of a repeatable pattern.",
+      "predicted_next_move": "No reliable prediction can be made at this time.",
+      "recommendation": "Continue monitoring Pathfinder Labs and record the next signal of any type; watch for whether a new signal repeats the pricing\u2192messaging ordering.",
+      "confidence": "none",
+      "missing_evidence": "A fourth signal after 2026-08-05 (e.g., another feature, pricing, or messaging event) that would allow a repeatable transition to be observed.",
+      "narrative_withheld": false,
+      "signal_count": 3,
+      "timeline_window": "2026-03-18 to 2026-08-05",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-08-05",
+      "evidence_age_days": 54,
+      "evidence_staleness": "fresh",
+      "days_overdue": 0
+    }
+  },
+  "Tidewater Analytics": {
+    "verdicts": {
+      "A": "PASS",
+      "B": "PASS",
+      "C": "PASS",
+      "D": "PASS",
+      "E": "PASS"
+    },
+    "notes": {
+      "A": [],
+      "B": [],
+      "C": [],
+      "D": [],
+      "E": []
+    },
+    "read": {
+      "competitor": "Tidewater Analytics",
+      "patterns": "Evidence insufficient: only three signals and each transition (feature\u2192messaging, messaging\u2192pricing) occurs once, so no repeating pattern can be identified; a fourth signal would be needed.",
+      "inferred_intent": "Insufficient evidence to infer strategic intent.",
+      "predicted_next_move": "No reliable prediction can be made; a subsequent signal that repeats a prior transition (e.g., another feature or pricing announcement) would be required to forecast.",
+      "recommendation": "Continue monitoring Tidewater Analytics and record any new signal, focusing on whether a repeat of the observed transitions occurs.",
+      "confidence": "none",
+      "missing_evidence": "A fourth signal that repeats a previous transition would most raise confidence.",
+      "narrative_withheld": false,
+      "signal_count": 3,
+      "timeline_window": "2026-02-04 to 2026-08-06",
+      "model_used": "openai/gpt-oss-120b",
+      "data_as_of": "2026-08-06",
+      "evidence_age_days": 53,
+      "evidence_staleness": "fresh",
+      "days_overdue": 0
+    }
+  }
+}

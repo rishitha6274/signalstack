@@ -1,0 +1,16 @@
+{
+  "competitor": "Palisade Security",
+  "patterns": "The timeline shows a single observed sequence of signal types: feature (2026-01-09) → messaging (2026-01-23) → funding (2026-02-27) → hiring (2026-03-20) → feature (2026-04-17) → pricing (2026-05-22) → messaging (2026-06-19) → feature (2026-07-24) → hiring (2026-08-14) → pricing (2026-09-05) → feature (2026-09-25). Each transition appears only once (see FACTS).",
+  "inferred_intent": "Palisade is pursuing a compliance‑centric strategy aimed at US federal and European data‑residency markets, adding certifications, a sovereign cloud region, and dedicated pricing tiers to attract government and privacy‑sensitive customers.",
+  "predicted_next_move": "Within the next 30 days (by 2026-10-28) Palisade will issue a public messaging update—such as a homepage tagline or blog post—highlighting its new sovereign‑cloud capability and data‑residency compliance for European customers.",
+  "recommendation": "Develop a competitive brief on our own data‑residency and compliance features and engage EU‑focused prospects before Palisade’s anticipated messaging rollout.",
+  "confidence": "low",
+  "missing_evidence": "A follow‑up messaging signal after the 2026-09-25 feature would confirm a recurring feature‑to‑messaging transition.",
+  "signal_count": 11,
+  "timeline_window": "2026-01-09 to 2026-09-25",
+  "model_used": "openai/gpt-oss-120b",
+  "data_as_of": "2026-09-25",
+  "evidence_age_days": 3,
+  "evidence_staleness": "fresh",
+  "days_overdue": 0
+}

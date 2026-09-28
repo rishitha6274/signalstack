@@ -1,0 +1,17 @@
+{
+  "competitor": "Vertex Cloud",
+  "patterns": "Evidence insufficient: only single instances of each transition (feature→pricing on 2026-01-22→2026-04-08, pricing→messaging on 2026-04-08→2026-06-30, messaging→feature on 2026-06-30→2026-08-12) and no repeating pattern.",
+  "inferred_intent": "Insufficient evidence to infer a strategic intent.",
+  "predicted_next_move": "No reliable prediction can be made at this time.",
+  "recommendation": "Continue monitoring Vertex Cloud signals and specifically watch for a repeat of the pricing→messaging→feature sequence.",
+  "confidence": "none",
+  "missing_evidence": "A second occurrence of the pricing→messaging→feature sequence would confirm a recurring pattern.",
+  "narrative_withheld": false,
+  "signal_count": 4,
+  "timeline_window": "2026-01-22 to 2026-08-12",
+  "model_used": "openai/gpt-oss-120b",
+  "data_as_of": "2026-08-12",
+  "evidence_age_days": 47,
+  "evidence_staleness": "fresh",
+  "days_overdue": 0
+}

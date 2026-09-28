@@ -1,0 +1,17 @@
+{
+  "competitor": "Corvus Data",
+  "patterns": "Repeating transitions: feature→messaging occurred on 2026-02-19→2026-03-26 and 2026-07-16→2026-08-20; messaging→pricing occurred on 2026-03-26→2026-05-07 and 2026-08-20→2026-09-08. A single pricing→feature step was seen on 2026-09-08→2026-09-24.",
+  "inferred_intent": "Corvus Data appears to introduce a product capability (feature), then use messaging to emphasize compliance/licensing (messaging), and shortly after adjust pricing to monetize the new capability (pricing), indicating a strategy to grow enterprise revenue and lock‑in customers.",
+  "predicted_next_move": "A messaging announcement (e.g., new compliance certification or open‑core licence reaffirmation) is expected around 2026-10-25 to 2026-10-31, observable as a blog post, press release or website update.",
+  "recommendation": "Draft and schedule a counter‑messaging brief highlighting our own SOC 2/ISO 27001 compliance and more flexible pricing, and begin outreach to shared prospects before the anticipated late‑October announcement.",
+  "confidence": "high",
+  "missing_evidence": "A messaging signal dated within ~35 days after 2026-09-24 would confirm the recurring feature→messaging cycle.",
+  "narrative_withheld": false,
+  "signal_count": 8,
+  "timeline_window": "2026-02-19 to 2026-09-24",
+  "model_used": "openai/gpt-oss-120b",
+  "data_as_of": "2026-09-24",
+  "evidence_age_days": 4,
+  "evidence_staleness": "fresh",
+  "days_overdue": 0
+}
