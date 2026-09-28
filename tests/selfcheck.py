@@ -1100,6 +1100,17 @@ def main() -> int:
     check("D2: saying nothing has repeated satisfies the disclosure",
           not _val.check_no_repeat_disclosure(_no_repeat, palisade_facts),
           "a compliant disclosure was rejected")
+    check("D2: naming the missing second occurrence is the same disclosure",
+          not _val.check_no_repeat_disclosure(
+              {**_no_repeat, "missing_evidence":
+               "A second observed instance of any transition would raise confidence "
+               "in a recurring strategic cadence."}, palisade_facts),
+          "the disclosure was rejected for not containing the word 'no'")
+    check("D2: a disclosure that mentions neither is still rejected",
+          bool(_val.check_no_repeat_disclosure(
+              {**_no_repeat, "missing_evidence":
+               "A feature release in the next two weeks."}, palisade_facts)),
+          "an unrelated missing_evidence was accepted as a disclosure")
     check("D2: repeat language with nothing priced is rejected",
           any("no transition type repeating" in p for p in _val.check_repeat_language(
               {**_no_repeat,
@@ -2089,6 +2100,18 @@ def main() -> int:
                            "    if True:  # MUTANT\n        return []")])),
         lambda m: bool(m["val"].check_no_repeat_disclosure(
             {"missing_evidence": "Another quarter of data."}, palisade_facts)),
+    )
+    _mutates(
+        "D2: dropping the missing-second-occurrence form of the disclosure",
+        lambda: _stack(validators=_mutant_from(
+            "backend.validators",
+            replacements=[("    if _MISSING_SECOND_DISCLOSURE.search(missing):\n"
+                           "        return []",
+                           "    if False:  # MUTANT\n        return []")])),
+        lambda m: not m["val"].check_no_repeat_disclosure(
+            {"missing_evidence": "A second observed instance of any transition would "
+                                 "raise confidence in a recurring strategic cadence."},
+            palisade_facts),
     )
     _mutates(
         "D2: dropping the repeat-language rule",

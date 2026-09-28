@@ -407,8 +407,11 @@ def _correction_notice(problems: list[str], facts) -> str:
             lines.append(
                 "No transition type repeats in this timeline, so do not use "
                 "\"repeats\", \"cycle\", \"loop\" or \"recurring\" for anything. Say "
-                "\"one observed instance\" instead, and make \"missing_evidence\" state "
-                "that no transition has repeated. \"medium\" is the ceiling here."
+                "\"one observed instance\" instead. \"missing_evidence\" must say that "
+                "nothing has repeated yet, or name the occurrence that is missing — "
+                "either \"no transition has repeated; a second feature->hiring would be "
+                "the first repeat\" or \"a second feature->hiring would be the first "
+                "repeat\" is enough. \"medium\" is the ceiling here."
             )
     else:
         lines.append(

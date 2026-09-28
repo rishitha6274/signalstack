@@ -295,6 +295,16 @@ _NO_REPEAT_DISCLOSURE = re.compile(
     r"cyclical|loop|loops)\b",
     re.IGNORECASE,
 )
+# The same disclosure made the other way round: naming the occurrence that is
+# missing. "A second feature->hiring would be the first repeat" tells the reader
+# no transition has repeated just as plainly as "nothing has repeated yet", and
+# it is the form the model reaches for unprompted.
+_MISSING_SECOND_DISCLOSURE = re.compile(
+    r"\b(second|another|one more|further)\b[^.;]{0,90}?"
+    r"\b(repeat|repeats|repeated|repeating|recurs|recurring|cycle|cycles|"
+    r"cyclical|loop|loops|occurrence|instance)\b",
+    re.IGNORECASE,
+)
 
 
 def _unnegated_repeat_words(text: str) -> list[str]:
@@ -349,16 +359,29 @@ def check_no_repeat_disclosure(response: dict, facts: TimelineFacts) -> list[str
     fills that gap is by reaching for "a cycle" — the exact claim the FACTS
     block forbids. Requiring the disclosure makes the absence explicit and gives
     the confidence cap something to hang on.
+
+    Two wordings satisfy it, because it is a statement about the evidence and
+    not a sentence to be matched. The first denies the repeat outright; the
+    second names the occurrence that is missing. Only the first was accepted in
+    the first version, and a live read failed on it: the model wrote "a second
+    observed instance of any transition would raise confidence in a recurring
+    strategic cadence", which discloses the non-repetition as concretely as
+    anything could, and was rejected for not containing the word "no". A check
+    that turns on phrasing is the same defect as the interval rules that used
+    to pass "14 days" and fail "two weeks" — the spelling deciding the verdict.
     """
     if not facts.evidence_sufficient or facts.repeated_transitions():
         return []
     missing = str(response.get("missing_evidence") or "")
     if _NO_REPEAT_DISCLOSURE.search(missing):
         return []
+    if _MISSING_SECOND_DISCLOSURE.search(missing):
+        return []
     return [
         "no transition type has repeated in this timeline, so \"missing_evidence\" must "
-        "state that (e.g. \"a second feature->hiring would be the first repeat; nothing "
-        "has repeated yet\")"
+        "state that — either that nothing has repeated yet, or by naming the occurrence "
+        "that is missing (e.g. \"nothing has repeated yet; a second feature->hiring would "
+        "be the first repeat\")"
     ]
 
 
