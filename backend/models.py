@@ -187,9 +187,18 @@ class SynthesisResponse(BaseModel):
     inferred_intent: str
     predicted_next_move: str
     recommendation: str
+    # Calibration. A read that names a pattern but never says how much to trust
+    # it reads identically whether it rests on twelve signals or three, so the
+    # model has to commit to a level in words, and name the evidence that would
+    # move it. "none" is reserved for a refusal: there is no forecast to
+    # calibrate, and labelling one "low" would imply a weak prediction exists.
+    confidence: str = "none"  # high | medium | low | none
+    missing_evidence: str = ""
     # Provenance: what the read was built from, so the UI can be honest about it.
     signal_count: int = 0
-    timeline_window: str = ""
+    timeline_window: str = ""  # "2026-01-14 to 2026-08-11" — no signal count
+    signal_count_validated: bool = True  # False when a read failed validation
+    validation_notes: list[str] = []
     model_used: str = ""
     # Evidence freshness. A read built from a timeline whose last signal predates
     # today is still a valid read, but the reader has to be told how far behind
