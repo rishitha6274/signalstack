@@ -41,6 +41,7 @@ semantics above are load-bearing rather than theoretical.
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import re
@@ -451,6 +452,18 @@ class Handler(BaseHTTPRequestHandler):
             m = re.search(r"tracked signals for (.+?):", prompt)
             dates = re.findall(r"\[(\d{4}-\d{2}-\d{2})\]", prompt)
             n = len(dates)
+            # Behave like a date-aware model: read the injected clock and the
+            # freshness verdict out of the prompt, then forecast from today.
+            # If the wiring ever stops carrying them, these keys vanish and the
+            # date-anchoring checks in selfcheck fail rather than pass silently.
+            today_m = re.search(r"TIME REFERENCE: Today is (\d{4}-\d{2}-\d{2})", prompt)
+            today = today_m.group(1) if today_m else None
+            stale = "the evidence is stale" in prompt.lower()
+            horizon = (
+                datetime.date.fromisoformat(today) + datetime.timedelta(days=28)
+                if today
+                else None
+            )
             if n < 6:
                 payload = {
                     "patterns": (
@@ -467,6 +480,19 @@ class Handler(BaseHTTPRequestHandler):
                     "recommendation": "Keep logging signals for this competitor before drawing conclusions.",
                 }
             else:
+                forecast = (
+                    f"On or before {horizon.isoformat()} they ship role-based access control, "
+                    "scoped admin analytics, and put 'Contact sales' back on the pricing page as "
+                    "the primary CTA. " if horizon else
+                    "They ship role-based access control and restore 'Contact sales' as the "
+                    "primary CTA. "
+                )
+                stale_clause = (
+                    f"This rests on evidence that stopped at {dates[-1]} and has been quiet since, "
+                    "so the timing is a projection from a lapsed cadence rather than a live "
+                    "commitment; re-check their release notes and careers page before acting on "
+                    "the date. " if stale else ""
+                )
                 payload = {
                     "patterns": (
                         f"{n} signals between {dates[0]} and {dates[-1]} form an ordered chain: a "
@@ -481,15 +507,15 @@ class Handler(BaseHTTPRequestHandler):
                         "conversation onto procurement-led deals."
                     ),
                     "predicted_next_move": (
-                        "Within 6-8 weeks they make 'Contact sales' the default CTA on the pricing "
-                        "page, launch a paid enterprise pilot, and post another 2-3 strategic-account "
-                        "roles. Falsified if the self-serve $32 tier stays the primary conversion path "
-                        "or volume hiring stops."
+                        f"Counting from today ({today}), " + stale_clause + forecast +
+                        "Falsified if the self-serve $32 tier stays the primary conversion path "
+                        "or volume hiring does not resume."
                     ),
                     "recommendation": (
-                        "Ship SSO and audit logs in your own product this quarter and pre-empt their "
-                        "pilot with an enterprise-tier SKU, because the price war buys them the buyer "
-                        "relationships their Series C is funding."
+                        "Re-check Nimbus's changelog and open roles this week to confirm the "
+                        "cadence has resumed, and in parallel ship SSO and audit logs in your own "
+                        "product plus an enterprise-tier SKU, so a pre-emptive offer is ready "
+                        "rather than late."
                     ),
                 }
 

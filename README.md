@@ -75,6 +75,25 @@ Pagination is paged to exhaustion with a ceiling (`MAX_TIMELINE_PAGES`), then de
 
 That second rule is what makes the contrast demo work. Ask about a competitor with four uncorrelated signals and the agent reports that it cannot distinguish a strategy from routine maintenance — instead of manufacturing one to fill the shape of the answer.
 
+**4b. The read knows what day it is, and is honest when the evidence has gone stale.**
+
+The model only ever sees dates that appear in the timeline, so with no reference point it anchors every forecast to the *last logged signal*. That produced a live, fully-grounded prediction with a deadline that had already passed — "will announce RBAC by ~2026-09-20", generated on the 28th. Every signal it cited was real and the cadence was genuinely 2–4 weeks; the forecast was simply about a window that had closed. A reader skims the confident date and stops there.
+
+`backend/synthesis.py` now hands the model an explicit clock and a freshness verdict:
+
+```
+TIME REFERENCE: Today is 2026-09-28. The most recent signal is dated 2026-08-19,
+40 day(s) ago, well beyond this competitor's usual ~14-day signal rhythm. The
+evidence is STALE: the timeline may no longer reflect what this competitor is
+doing, and a forecast drawn from it carries that uncertainty.
+```
+
+"Stale" is judged **against the competitor's own rhythm**, not a fixed day count — the median gap between its own signals, at 1× fresh, 2× aging, beyond that stale. A company that ships weekly and one that ships twice a year are not comparable against a shared threshold. On the seeded data this separates cleanly: Nimbus AI (14-day rhythm, 40 days silent) is stale, while Vertex Cloud (76-day rhythm, 47 days quiet) and Pathfinder Labs (70-day rhythm, 54 days quiet) are both still current — they are simply infrequent, and a fixed threshold would have flagged all three.
+
+The rules that follow from it: forecast from *today*, never present a past date as a future deadline, and when the evidence is stale, disclose that in the prediction and lead the recommendation with the step that **refreshes** the intelligence rather than the step that acts on it. Staleness is never a reason to refuse — the pattern analysis is still the valuable output; it just stops masquerading as current.
+
+`SynthesisResponse` carries `data_as_of`, `evidence_age_days` and `evidence_staleness` as provenance, and the UI shows a warning banner when the evidence is stale, so the reader sees the caveat before the forecast rather than after it. The no-LLM fallback path reports the same provenance.
+
 **5. Tag scoping uses `all_strict`, and observation consolidation is switched off.**
 
 Two things were found by running against the live API, not by reading the spec.
@@ -95,7 +114,7 @@ Two independent guards keep a derived row off the timeline regardless: the `all_
 python tests/selfcheck.py
 ```
 
-59 checks, no network, no credits. It runs the real application code against `tests/hindsight_double.py` — a double built from the published OpenAPI (`info.version 0.10.1`), not a mock that returns whatever the app happens to want. It enforces the rules a naive mock skips:
+106 checks, no network, no credits. It runs the real application code against `tests/hindsight_double.py` — a double built from the published OpenAPI (`info.version 0.10.1`), not a mock that returns whatever the app happens to want. It enforces the rules a naive mock skips:
 
 - `MemoryItem.metadata` values must be **strings**; a nested object is a 422
 - `MemoryItem.content` is required
@@ -104,7 +123,7 @@ python tests/selfcheck.py
 - the bank listing paginates and sorts by `last_write_at` DESC
 - missing banks are 404; invalid `tags_match` / `time_field` are 422
 
-It then exercises the seeded dataset, idempotent re-seeding, timeline ordering, synthesis grounding, thin-competitor refusal, live ingestion, and each malformed-LLM recovery path.
+It then exercises the seeded dataset, idempotent re-seeding, timeline ordering, synthesis grounding, thin-competitor refusal, time anchoring and evidence staleness, live ingestion, and each malformed-LLM recovery path.
 
 It is not a substitute for a live run — it proves the client matches the documented contract, not that your account is provisioned. Run it first, then point at real Hindsight.
 
@@ -153,7 +172,7 @@ Seeded, live-verified, and left in a clean state: **19 signals retained, 19 memo
 | `scripts/seed_data.py` | loads the synthetic dataset into Hindsight |
 | `frontend/app.py` | Streamlit UI |
 | `tests/hindsight_double.py` | OpenAPI-faithful Hindsight + Groq contract double |
-| `tests/selfcheck.py` | 59-check offline end-to-end suite |
+| `tests/selfcheck.py` | 106-check offline end-to-end suite |
 
 ### API
 

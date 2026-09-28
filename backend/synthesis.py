@@ -17,6 +17,8 @@ brief asks for. Two things make it work:
 from __future__ import annotations
 
 import logging
+import statistics
+from dataclasses import dataclass
 from datetime import date
 
 from . import hindsight_client
@@ -31,6 +33,8 @@ SYNTHESIS_PROMPT = """You are a competitive intelligence analyst. Below is the f
 timeline of tracked signals for {competitor}:
 
 {numbered_timeline}
+
+TIME REFERENCE: Today is {today}. {age_sentence}
 
 Analyze this timeline and return ONLY valid JSON with these fields:
 - "patterns": recurring patterns or cadence you observe across signal types, citing specific dates
@@ -67,6 +71,22 @@ GROUNDING RULES (these override any habit of giving generic advice):
   recommendation must be to keep collecting signals and state what to watch for
   — not a business decision premised on a strategy you invented.
 
+TIME ANCHORING (you cannot infer the current date — it is given above):
+- Forecast from TODAY, never from the last date in the timeline. When you write
+  "within 2 weeks", you mean 2 weeks from today, not 2 weeks after the final
+  logged signal. The timeline's final date is evidence, not the present.
+- NEVER present a date that is already in the past as a future prediction. If
+  the cadence you measured from the timeline would land on a date before today,
+  that tells you the pattern has either already played out or gone quiet — say
+  which, and forecast from today instead of naming a stale deadline.
+- Respect the evidence-freshness note in the TIME REFERENCE line. If it says the
+  evidence is stale, you may still predict, but "predicted_next_move" MUST state
+  that it rests on evidence that has gone quiet, and "recommendation" MUST lead
+  with the step that refreshes it (re-check the competitor's recent activity)
+  before the step that acts on it. A confident, precisely-dated forecast built on
+  stale evidence is a failure of this rule even when the underlying pattern is
+  real and well-supported.
+
 The four fields are one argument. If "patterns" reports insufficient evidence,
 the other three must follow that conclusion rather than quietly contradicting it.
 
@@ -90,18 +110,126 @@ def timeline_window(signals: list[Signal]) -> str:
     return f"{signals[0].date} to {signals[-1].date} ({len(signals)} signals)"
 
 
-def build_prompt(competitor: str, signals: list[Signal]) -> str:
+# --------------------------------------------------------------------------
+# Evidence clock
+# --------------------------------------------------------------------------
+# The model is shown a timeline of dates and nothing else, so with no reference
+# point it anchors every forecast to the *last logged signal*. When a
+# competitor's data is three weeks old, that produces a confidently-worded
+# prediction about a window that already closed — technically grounded in real
+# signals, and still wrong in the way that matters to a reader.
+#
+# The fix is to hand the model the current date and tell it how far the evidence
+# has drifted, using the timeline's own rhythm as the yardstick. "Stale" means
+# "has gone quiet relative to how often this competitor normally speaks", not
+# "is more than N days old" — a company that ships weekly and one that ships
+# twice a year are not comparable against a fixed threshold.
+@dataclass(frozen=True)
+class EvidenceClock:
+    """Where the timeline sits relative to today."""
+
+    today: date
+    as_of: str  # date of the most recent signal, ISO
+    age_days: int  # today - as_of, clamped at 0
+    cadence_days: int | None  # median gap between consecutive signals
+    staleness: str  # fresh | aging | stale | unknown
+
+    @property
+    def age_sentence(self) -> str:
+        """One line, in the model's own terms, telling it how current this is."""
+        if not self.as_of:
+            return "There are no signals on record yet."
+        if self.staleness == "unknown" or self.cadence_days is None:
+            return (
+                f"The most recent signal is dated {self.as_of}, {self.age_days} day(s) ago. "
+                "There is not enough history to judge how current that is."
+            )
+        rhythm = f"this competitor's usual ~{self.cadence_days}-day signal rhythm"
+        if self.staleness == "fresh":
+            return (
+                f"The most recent signal is dated {self.as_of}, {self.age_days} day(s) ago — "
+                f"in line with {rhythm}, so the evidence is current."
+            )
+        if self.staleness == "aging":
+            return (
+                f"The most recent signal is dated {self.as_of}, {self.age_days} day(s) ago, "
+                f"which is past {rhythm} but not far past it. Treat the timeline as current "
+                "but possibly incomplete at the recent end."
+            )
+        return (
+            f"The most recent signal is dated {self.as_of}, {self.age_days} day(s) ago, well "
+            f"beyond {rhythm}. The evidence is STALE: the timeline may no longer reflect what "
+            "this competitor is doing, and a forecast drawn from it carries that uncertainty."
+        )
+
+
+def _parse_iso(value: str) -> date | None:
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except (ValueError, TypeError):
+        return None
+
+
+def _cadence_days(signals: list[Signal]) -> int | None:
+    """Median gap between consecutive signals — the timeline's own rhythm.
+
+    Median rather than mean: a single long dormancy stretches the mean and would
+    make an active competitor look quiet.
+    """
+    gaps: list[int] = []
+    for earlier, later in zip(signals, signals[1:]):
+        start, end = _parse_iso(earlier.date), _parse_iso(later.date)
+        if start and end and (end - start).days > 0:
+            gaps.append((end - start).days)
+    return int(statistics.median(gaps)) if gaps else None
+
+
+def evidence_clock(signals: list[Signal], today: date | None = None) -> EvidenceClock:
+    """Assess the timeline's freshness against today and its own cadence."""
+    today = today or date.today()
+    if not signals:
+        return EvidenceClock(today, "", 0, None, "unknown")
+
+    as_of = signals[-1].date
+    last = _parse_iso(as_of)
+    age = max((today - last).days, 0) if last else 0
+    cadence = _cadence_days(signals)
+
+    if not cadence:
+        staleness = "unknown"
+    elif age <= cadence:
+        staleness = "fresh"
+    elif age <= cadence * 2:
+        staleness = "aging"
+    else:
+        staleness = "stale"
+    return EvidenceClock(today, as_of, age, cadence, staleness)
+
+
+def build_prompt(
+    competitor: str, signals: list[Signal], today: date | None = None
+) -> str:
+    clock = evidence_clock(signals, today=today)
     return SYNTHESIS_PROMPT.format(
-        competitor=competitor, numbered_timeline=format_timeline(signals)
+        competitor=competitor,
+        numbered_timeline=format_timeline(signals),
+        today=clock.today.isoformat(),
+        age_sentence=clock.age_sentence,
     ) + GROUNDING_RULES
 
 
-def _fallback_response(competitor: str, signals: list[Signal], reason: str) -> SynthesisResponse:
+def _fallback_response(
+    competitor: str,
+    signals: list[Signal],
+    reason: str,
+    clock: EvidenceClock | None = None,
+) -> SynthesisResponse:
     """Deterministic read used when the LLM is unavailable.
 
     Still a real answer: it reports the chronological span, the per-type
     counts, and says plainly that the narrative could not be generated.
     """
+    clock = clock or evidence_clock(signals)
     counts: dict[str, int] = {}
     for signal in signals:
         counts[signal.signal_type] = counts.get(signal.signal_type, 0) + 1
@@ -122,13 +250,23 @@ def _fallback_response(competitor: str, signals: list[Signal], reason: str) -> S
         signal_count=len(signals),
         timeline_window=timeline_window(signals),
         model_used="fallback (no LLM)",
+        data_as_of=clock.as_of,
+        evidence_age_days=clock.age_days,
+        evidence_staleness=clock.staleness,
     )
 
 
-def generate_strategic_read(competitor: str) -> SynthesisResponse:
-    """Full-timeline retrieval from Hindsight -> cross-signal strategic narrative."""
+def generate_strategic_read(
+    competitor: str, today: date | None = None
+) -> SynthesisResponse:
+    """Full-timeline retrieval from Hindsight -> cross-signal strategic narrative.
+
+    ``today`` is injectable so the time-anchoring behaviour can be tested
+    against a fixed clock instead of whatever day the suite happens to run on.
+    """
     competitor = competitor.strip()
     signals = hindsight_client.client.get_timeline(competitor)
+    clock = evidence_clock(signals, today=today)
 
     if not signals:
         return SynthesisResponse(
@@ -140,14 +278,17 @@ def generate_strategic_read(competitor: str) -> SynthesisResponse:
             signal_count=0,
             timeline_window=timeline_window(signals),
             model_used="no retrieval",
+            data_as_of=clock.as_of,
+            evidence_age_days=clock.age_days,
+            evidence_staleness=clock.staleness,
         )
 
-    prompt = build_prompt(competitor, signals)
+    prompt = build_prompt(competitor, signals, today=today)
     try:
         parsed, model_used = llm_client.call_llm_json(prompt)
     except LLMError as exc:
         log.warning("synthesis LLM call failed for %s: %s", competitor, exc)
-        return _fallback_response(competitor, signals, str(exc))
+        return _fallback_response(competitor, signals, str(exc), clock)
 
     # Coerce defensively: a missing or null field should degrade one section,
     # not blank the whole read.
@@ -167,4 +308,7 @@ def generate_strategic_read(competitor: str) -> SynthesisResponse:
         signal_count=len(signals),
         timeline_window=timeline_window(signals),
         model_used=model_used,
+        data_as_of=clock.as_of,
+        evidence_age_days=clock.age_days,
+        evidence_staleness=clock.staleness,
     )

@@ -323,6 +323,29 @@ else:
                     f"Built from **{read['signal_count']} signals** "
                     f"({read['timeline_window']}) via `{read['model_used']}`"
                 )
+                # Surface evidence freshness next to the read. Without it a
+                # forecast drawn from a timeline that stopped weeks ago reads
+                # exactly like a live one, which is the whole failure mode the
+                # time anchoring exists to prevent.
+                age = read.get("evidence_age_days")
+                as_of = read.get("data_as_of")
+                if age is not None and as_of:
+                    staleness = read.get("evidence_staleness", "unknown")
+                    if staleness == "stale":
+                        st.warning(
+                            f"**Evidence is {age} days old.** The last signal for this "
+                            f"competitor is dated {as_of}. The read below is drawn from a "
+                            "cadence that has gone quiet, so treat the timing as a "
+                            "projection rather than a live commitment."
+                        )
+                    elif staleness == "aging":
+                        st.info(
+                            f"Evidence is {age} days old (last signal {as_of}) — past this "
+                            "competitor's usual rhythm, so the recent end of the timeline "
+                            "may be incomplete."
+                        )
+                    else:
+                        st.caption(f"Evidence current as of {as_of} ({age} days old).")
                 for title, key, icon in SECTIONS:
                     st.markdown(
                         f'<div class="ss-sec"><div class="ss-sec-t">{icon} {title}</div>'

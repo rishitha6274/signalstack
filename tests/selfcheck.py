@@ -253,6 +253,118 @@ def main() -> int:
 
     check("unknown competitor returns empty, not an error", client.get_timeline("Nobody Ltd") == [])
 
+    # ------------------------------------------------------------------
+    # 4b. Time anchoring
+    # ------------------------------------------------------------------
+    # The model only ever sees dates that appear in the timeline, so with no
+    # reference point it anchors every forecast to the *last logged signal*.
+    # Live, that produced a prediction with a deadline that had already passed
+    # ("by 2026-09-20" on the 28th) — grounded in real signals, and still wrong
+    # in the way that matters to a reader. These checks pin the clock so they
+    # do not silently change meaning as the calendar moves.
+    print("\n\033[1m4b. Time anchoring\033[0m")
+    import datetime as _dt
+    from backend.synthesis import build_prompt, evidence_clock, GROUNDING_RULES
+
+    TODAY = _dt.date(2026, 9, 28)
+    nimbus_clock = evidence_clock(nimbus, today=TODAY)
+    check("cadence is the median gap between signals",
+          nimbus_clock.cadence_days == 14, f"got {nimbus_clock.cadence_days}")
+    check("age is measured from the last signal, not the first",
+          nimbus_clock.as_of == "2026-08-19" and nimbus_clock.age_days == 40,
+          f"as_of={nimbus_clock.as_of} age={nimbus_clock.age_days}")
+    check("40 days silent on a 14-day rhythm reads as stale",
+          nimbus_clock.staleness == "stale", f"got {nimbus_clock.staleness}")
+
+    # The point of judging against a competitor's own rhythm: a company that
+    # speaks every ten weeks is not "stale" at 47 days. Both quiet competitors
+    # below have longer median gaps than their silence, so both stay current.
+    for name, expect in (("Vertex Cloud", "fresh"), ("Pathfinder Labs", "fresh")):
+        c = evidence_clock(client.get_timeline(name), today=TODAY)
+        check(f"{name} is not stale ({c.cadence_days}-day rhythm, {c.age_days}d quiet)",
+              c.staleness == expect, f"got {c.staleness}")
+
+    # Same data, different clock -> different verdict. Proves the assessment is
+    # computed rather than a constant attached to the prompt.
+    check("fresh when today is the last signal's own day",
+          evidence_clock(nimbus, today=_dt.date(2026, 8, 19)).staleness == "fresh")
+    check("aging between 1x and 2x the cadence",
+          evidence_clock(nimbus, today=_dt.date(2026, 9, 10)).staleness == "aging")
+
+    p = build_prompt("Nimbus AI", nimbus, today=TODAY)
+    check("prompt states today's date explicitly",
+          "TIME REFERENCE: Today is 2026-09-28" in p)
+    check("prompt quantifies the evidence gap",
+          "40 day(s) ago" in p and "2026-08-19" in p)
+    check("prompt marks stale evidence as STALE", "STALE" in p)
+    check("prompt cites the competitor's own rhythm", "~14-day signal rhythm" in p)
+    check("prompt forbids forecasting from the last signal date",
+          "Forecast from TODAY" in p)
+    check("prompt forbids a past date as a future prediction",
+          "NEVER present a date that is already in the past" in p)
+    check("TIME ANCHORING rules reached the prompt", "TIME ANCHORING" in p and "TIME ANCHORING" in GROUNDING_RULES)
+    check("time-anchored prompt still satisfies Groq's json_object precondition",
+          "json" in p.lower())
+
+    anchored = generate_strategic_read("Nimbus AI", today=TODAY)
+    check("response carries the evidence as-of date",
+          anchored.data_as_of == "2026-08-19", f"got {anchored.data_as_of}")
+    check("response carries the evidence age",
+          anchored.evidence_age_days == 40, f"got {anchored.evidence_age_days}")
+    check("response carries the staleness verdict",
+          anchored.evidence_staleness == "stale", f"got {anchored.evidence_staleness}")
+
+    # The real regression: a *deadline* in the past presented as a forecast.
+    # Past dates are legitimate in a prediction when cited as evidence ("this
+    # rests on evidence that stopped at 2026-08-19"), so the invariant is not
+    # "no past dates" but "a future deadline is actually named". The original
+    # bug produced a prediction whose only date was 2026-09-20, already gone on
+    # the 28th — zero future dates, which is what this catches.
+    pred_dates = [
+        _dt.date.fromisoformat(w.strip(".,()"))
+        for w in anchored.predicted_next_move.split()
+        if re_date(w.strip(".,()"))
+    ]
+    check("prediction names at least one future deadline",
+          any(d > TODAY for d in pred_dates),
+          f"dates cited: {[str(d) for d in pred_dates]}")
+    check("no date in the prediction is mis-parsed as a date",
+          all(d.year >= 2026 for d in pred_dates), f"got {[str(d) for d in pred_dates]}")
+    check("prediction is anchored to the injected clock, not the last signal",
+          "2026-09-28" in anchored.predicted_next_move,
+          f"got {anchored.predicted_next_move[:100]!r}")
+    check("stale evidence is disclosed in the prediction",
+          "quiet" in anchored.predicted_next_move.lower(),
+          f"got {anchored.predicted_next_move[:120]!r}")
+    check("stale evidence is disclosed in the recommendation",
+          "re-check" in anchored.recommendation.lower(),
+          f"got {anchored.recommendation[:120]!r}")
+    check("stale disclosure never degrades into refusing to analyse",
+          "insufficient" not in anchored.patterns.lower()
+          and len(anchored.predicted_next_move) > 60)
+
+    fresh = generate_strategic_read("Nimbus AI", today=_dt.date(2026, 8, 25))
+    check("fresh evidence does not carry a staleness disclaimer",
+          "quiet" not in fresh.predicted_next_move.lower()
+          and fresh.evidence_staleness == "fresh",
+          f"staleness={fresh.evidence_staleness}")
+
+    # Freshness is provenance, so the no-LLM path has to report it too.
+    from backend.synthesis import _fallback_response
+
+    fb = _fallback_response("Nimbus AI", nimbus, "test", nimbus_clock)
+    check("fallback read also reports evidence freshness",
+          fb.data_as_of == "2026-08-19" and fb.evidence_staleness == "stale")
+
+    # One signal has no rhythm to compare against, so it must not claim one.
+    solo = [nimbus[0]]
+    solo_clock = evidence_clock(solo, today=TODAY)
+    check("a single signal has unknown cadence, not a fabricated one",
+          solo_clock.cadence_days is None and solo_clock.staleness == "unknown",
+          f"got {solo_clock.cadence_days} / {solo_clock.staleness}")
+    check("empty timeline has no as-of date",
+          evidence_clock([], today=TODAY).as_of == "")
+
     print("\n\033[1m5. Live ingestion\033[0m")
     sig = extract_signal(
         "Nimbus AI opened a Senior Solutions Architect role in the enterprise segment on 2026-09-20.",

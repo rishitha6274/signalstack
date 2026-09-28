@@ -191,6 +191,12 @@ class SynthesisResponse(BaseModel):
     signal_count: int = 0
     timeline_window: str = ""
     model_used: str = ""
+    # Evidence freshness. A read built from a timeline whose last signal predates
+    # today is still a valid read, but the reader has to be told how far behind
+    # the evidence is or they will read a stale forecast as a live one.
+    data_as_of: str = ""  # date of the most recent signal, ISO
+    evidence_age_days: Optional[int] = None  # whole days between that and today
+    evidence_staleness: str = ""  # fresh | aging | stale | unknown
 
 
 # --------------------------------------------------------------------------
