@@ -1,5 +1,17 @@
 # Signal Stack
 
+> **TL;DR**: Signal Stack remembers every competitor signal (typed, dated, ordered) and reasons across them to infer intent and predict the next move. It refuses to fabricate when evidence is insufficient (5-signal floor, longest gap ≤ 3× median), and it is honest when evidence goes stale. Seeded, deterministic, and verifiable offline.
+
+**60-second demo**
+1. Select *Nimbus AI* → switch to "Full timeline" (12 signals).  
+2. Click **🧠 Get Strategic Read** → see a dated, falsifiable prediction grounded in the timeline.  
+3. Switch to *Vertex Cloud* (4 signals) → read refuses with `confidence: none` and names the missing evidence.  
+4. Switch to *Brightline Retail* → stale evidence is acknowledged (84d quiet) rather than projected.
+
+**Key sections:** [The problem](#the-problem) · [How Hindsight memory is used](#how-hindsight-memory-is-used) · [Demo script](#demo-script) · [Known limitations](#known-limitations) · [Audit evidence](audit/) · [Verifying without an API key](#verifying-without-an-api-key)
+
+---
+
 **A competitive intelligence agent that remembers every competitor signal over time, and connects them into a strategic story that gets sharper the longer it watches.**
 
 Most competitor tracking is a list of disconnected facts. Signal Stack remembers *every* signal — pricing changes, feature launches, hiring spikes, messaging shifts, funding rounds — and reasons across signal **types** to infer intent and predict the next move.
