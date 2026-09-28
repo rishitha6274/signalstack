@@ -113,9 +113,14 @@ API_HOST: str = _env("API_HOST", "127.0.0.1")
 # Where the Streamlit UI should find the API. Loopback inside one container.
 SIGNAL_STACK_API: str = _env("SIGNAL_STACK_API", f"http://127.0.0.1:{API_PORT}")
 # Seed the demo dataset on boot when memory is empty, so a fresh deploy comes up
-# populated instead of showing three empty competitors. Set AUTOSEED=0 to opt
-# out (e.g. when pointed at a real account you don't want written to).
-AUTOSEED: str = _env("AUTOSEED", "1").lower() not in {"0", "false", "no"}
+# populated instead of showing three empty competitors. Set AUTOSEED=1 to opt in.
+#
+# Defaults OFF. Boot-time seeding writes to whichever Hindsight account the key
+# points at, and nothing about that is safe to do implicitly: it ran against a
+# real account during development and left a half-populated set of banks, so
+# scripts/seed_data.py --reset became the honest way to manage memory. A fresh
+# deploy should set AUTOSEED=1 explicitly and mean it.
+AUTOSEED: str = _env("AUTOSEED", "0").lower() not in {"0", "false", "no"}
 
 
 def hindsight_configured() -> bool:

@@ -17,13 +17,16 @@ brief asks for. Two things make it work:
 from __future__ import annotations
 
 import logging
+import re
 import statistics
 from dataclasses import dataclass
 from datetime import date
 
-from . import hindsight_client
+from . import hindsight_client, validators
+from .facts import build_facts, days_overdue
 from .llm_client import LLMError, client as llm_client
-from .models import Signal, SynthesisResponse
+from .models import Confidence, Signal, SynthesisResponse
+from .validators import validate_response
 
 log = logging.getLogger("signal_stack.synthesis")
 
@@ -39,13 +42,12 @@ TIME REFERENCE: Today is {today}. {age_sentence}
 {facts_block}
 
 Analyze this timeline and return ONLY valid JSON with these fields:
-- "patterns": patterns you observe across signal types, citing specific dates
+- "patterns": the patterns or ordering you observe across signal types, citing specific dates
 - "inferred_intent": what strategic intent likely explains these moves
 - "predicted_next_move": a specific, falsifiable prediction of what they will likely do next
 - "recommendation": one concrete action our team should take in response
-- "confidence": one of "high", "medium", "low", or "none"
-- "missing_evidence": one sentence naming the specific additional signal that would
-  raise confidence in this read
+- "confidence": exactly one of "high", "medium", "low" (or "none" if refusing)
+- "missing_evidence": ONE sentence naming the specific additional observation that would most raise confidence
 
 Be specific. Reference actual signals and dates. Do not give generic advice."""
 
@@ -56,6 +58,14 @@ GROUNDING_RULES = """
 GROUNDING RULES (these override any habit of giving generic advice):
 - Every claim must be anchored to a specific signal in the timeline above, cited
   by its date. A claim you cannot date is a claim you must not make.
+- Every statement of a date, interval, length of time or count of occurrences
+  must be copied from the FACTS block. Do NOT compute, average, round or estimate
+  any figure yourself. The FACTS block already contains every interval between
+  consecutive signals, the median, the range, the days since the last signal, the
+  days overdue, and how many times each signal-type transition occurs. If you want
+  to say "a 4-6 week rhythm", read the intervals from the FACTS block and describe
+  only what is there. A cadence you inferred that does not appear in the FACTS
+  block is a fabrication, however plausible it sounds.
 - The signals above are stored in different signal types (pricing, feature,
   hiring, messaging, funding). Reason ACROSS types. The interesting finding is
   usually the *sequence* — e.g. a funding round followed weeks later by hiring
@@ -76,44 +86,25 @@ GROUNDING RULES (these override any habit of giving generic advice):
   recommendation must be to keep collecting signals and state what to watch for
   — not a business decision premised on a strategy you invented.
 
-CALIBRATION (required fields — a read without them is rejected):
-- "confidence" must be exactly one of "high", "medium", "low", "none". Judge it
-  against the FACTS block, not against how assertive the analysis sounds.
-- "missing_evidence" is ONE sentence naming the single most useful signal not
-  yet in the timeline that would raise confidence — e.g. "a second pricing move
-  would show the discounting is deliberate rather than a one-off". Never write
-  "none needed", and never restate the pattern back at me.
-- Use "none" only when you offer no prediction. A prediction always needs a
-  level. If the evidence is insufficient to predict, set "none" AND still
-  populate "missing_evidence" with what you are waiting for.
+REPETITION (the FACTS block counts every transition for you):
+- Call a sequence "repeating", "recurring", "a loop", "a cycle" or "a pattern"
+  ONLY IF the FACTS block shows that transition occurring at least twice. If a
+  transition is listed under "seen only ONCE", you must describe it as "one
+  observed instance" or "a single instance" — never as a repetition.
+- "Two instances" is not a cadence. One prior instance and one prediction is
+  still one instance: never count your own prediction as evidence for a pattern
+  that already happened.
 
-ARITHMETIC AND REPETITION (the FACTS block is authoritative):
-- You may ONLY cite an interval, cadence, or gap number that appears in the
-  FACTS block. Do not compute, estimate, average, or round your own. If the
-  median interval is 26 days, say 26 days — do not widen it to "30-45".
-- Do not list intervals selectively. When you enumerate them, the most recent
-  one belongs in the list even when it breaks the rhythm you are describing.
-- Call a sequence "repeating", "recurring", "a loop", "a cycle", or "a
-  rotation" ONLY when the FACTS block shows that transition at least twice.
-  When it appears once, write "one observed instance" or "a single instance".
-  An audit caught "repeats three times" for a cycle seen once, and
-  "consistently precedes" for a relationship that occurred zero times inside the
-  window it claimed. When you do have a repeat, state the count the facts give.
-- Any quoted phrase must be copied VERBATIM from a signal summary. Do not put
-  quotation marks around a phrase you invented to name a pattern.
-
-PREDICTION CONSISTENCY:
-- "predicted_next_move" must be consistent with the three most recent signals
-  quoted in the FACTS block. If your forecast departs from their direction, you
-  MUST say why in that same field. A prediction that quietly skips a stage you
-  identified yourself is a failure.
-- Any date you name must fall AFTER today. A date already in the past, or a
-  cadence continuation that lands in the past, is a failure: say whether the
-  pattern has gone quiet or already played out, then forecast forward.
-- If the FACTS block says the stream is OVERDUE, "predicted_next_move" MUST
-  state how many days overdue it is and what that does to the forecast, and
-  "confidence" must NOT be "high" — cap it at "medium" or "low". A precisely
-  dated forecast that reads as though the last signal were recent is a failure.
+CALIBRATION (required fields — a response missing either is rejected):
+- "confidence" is required: exactly one of "high", "medium", "low". Use "high"
+  only when the FACTS block shows a transition repeating at least twice AND the
+  stream is not overdue. Use "medium" when the evidence supports one clear
+  reading. Use "low" when the read is a plausible inference from thin or
+  late evidence.
+- "missing_evidence" is required: ONE sentence naming the specific additional
+  observation that would most raise confidence — e.g. "a second consecutive
+  X would confirm the cycle" or "any signal after {date} would tell us whether
+  the stream resumed". Name the thing, not the absence of confidence.
 
 TIME ANCHORING (you cannot infer the current date — it is given above):
 - Forecast from TODAY, never from the last date in the timeline. When you write
@@ -122,17 +113,37 @@ TIME ANCHORING (you cannot infer the current date — it is given above):
 - NEVER present a date that is already in the past as a future prediction. If
   the cadence you measured from the timeline would land on a date before today,
   that tells you the pattern has either already played out or gone quiet — say
-  which, and forecast from today instead of naming a stale deadline.
-- Respect the evidence-freshness note in the TIME REFERENCE line. If it says the
-  evidence is stale, you may still predict, but "predicted_next_move" MUST state
-  that it rests on evidence that has gone quiet, and "recommendation" MUST lead
-  with the step that refreshes it (re-check the competitor's recent activity)
-  before the step that acts on it. A confident, precisely-dated forecast built on
-  stale evidence is a failure of this rule even when the underlying pattern is
-  real and well-supported.
+  which, and forecast from today instead of naming a stale deadline. If the next
+  date your own cadence would produce has already passed, you MUST say that the
+  expected signal did not arrive on schedule.
+- Every date you predict must be after {today} (today's date is in the FACTS
+  block).
+- Respect the evidence-freshness note in the TIME REFERENCE line, and the
+  "days overdue" figure in the FACTS block. If the stream is overdue,
+  "predicted_next_move" MUST state how many days past its rhythm it is, and
+  "confidence" MUST NOT be "high". A precisely-dated forecast built on an overdue
+  stream is a failure of this rule even when the pattern itself is real.
 
-The four fields are one argument. If "patterns" reports insufficient evidence,
-the other three must follow that conclusion rather than quietly contradicting it.
+CONSISTENCY WITH THE LATEST SIGNALS:
+- "predicted_next_move" must be consistent with the three most recent signals in
+  the FACTS block, and with the direction they show. If your prediction departs
+  from that direction — for example the last three signals are pricing and
+  messaging and you predict a hiring wave — you must say explicitly why you
+  depart from it, in "predicted_next_move". Do not silently skip a stage of a
+  cycle you yourself identified in "patterns".
+
+The six fields are one argument. If "patterns" reports insufficient evidence,
+"inferred_intent" and "predicted_next_move" must follow that conclusion rather
+than quietly contradicting it, and "confidence" must then be "low" (or the
+response must be a refusal, which is described below).
+
+REFUSING:
+- If the evidence cannot support a strategic read, you may return a refusal
+  instead of a forecast: set "confidence" to "none", state plainly in
+  "predicted_next_move" that no reliable prediction can be made, and use
+  "missing_evidence" to name the specific signal that would change that. A
+  refusal with a specific missing-evidence sentence is a high-value answer, not
+  a failure.
 
 Output raw JSON only. No preamble, no markdown fences, no commentary outside the
 JSON object."""
@@ -147,169 +158,19 @@ def format_timeline(signals: list[Signal]) -> str:
 
 
 def timeline_window(signals: list[Signal]) -> str:
-    """The date window only.
+    """The date span only.
 
-    Deliberately excludes the signal count: the UI renders the count itself
-    ("Built from 9 signals (2026-01-14 to 2026-08-11)"), and including it here
-    produced the doubled, nested form "Built from 9 signals (2026-01-14 to
-    2026-08-11 (9 signals))".
+    This used to include the signal count ("2026-01-14 to 2026-08-11 (9
+    signals)"), and the UI already renders the count immediately before it —
+    "Built from **9 signals** (2026-01-14 to 2026-08-11 (9 signals))". Two
+    reports of the same number, inside each other, with the parentheses nested.
+    The count belongs to whoever is presenting; the span is what this describes.
     """
     if not signals:
         return "no signals recorded"
     if len(signals) == 1:
         return signals[0].date
     return f"{signals[0].date} to {signals[-1].date}"
-
-
-# --------------------------------------------------------------------------
-# Computed facts
-# --------------------------------------------------------------------------
-# The audit found the model inventing plausible cadences that the dates
-# contradict: "a 14-21 day cadence" over intervals of 6, 6, 9, ... 35 days; a
-# "30-45 day rhythm" over a 21-day range; three hand-picked 42-day gaps listed
-# while the most recent 27-day gap went unmentioned. Every one of those numbers
-# was arithmetic the model was never given and got wrong.
-#
-# So it is no longer asked to. Everything numeric is computed here, from the
-# timeline, and handed over as a FACTS block. The model may only cite numbers
-# that appear in that block, and the validators reject any that do not. This
-# also settles A and B: recurrence counts and overdue-ness become facts the
-# model reads rather than judgements it makes.
-@dataclass(frozen=True)
-class Facts:
-    """Every number the model is allowed to cite, computed from the timeline."""
-
-    intervals: tuple[int, ...]  # days between consecutive signals
-    median_interval: int | None
-    min_interval: int | None
-    max_interval: int | None
-    days_since_last: int
-    days_overdue: int  # days_since_last - median_interval, 0 if not overdue
-    transitions: tuple[tuple[str, str, int], ...]  # (from_type, to_type, count)
-    last_three: tuple[str, ...]  # the final signals, verbatim
-
-    @property
-    def repeatable_transitions(self) -> set[tuple[str, str]]:
-        """Adjacent type pairs seen at least twice — the only ones that may be
-        described as repeating, recurring, or a cycle."""
-        return {(a, b) for a, b, count in self.transitions if count >= 2}
-
-    @property
-    def allowed_numbers(self) -> set[int]:
-        """Numeric values the response may cite without a validation failure.
-
-        The interval figures and their simple multiples, plus the derived
-        counts. Deliberately generous: a validator that only permits one
-        phrasing forces awkward prose, and a false positive costs a retry.
-        Anything outside this set and unsupported by the timeline is a bug.
-        """
-        allowed: set[int] = set()
-        for base in (self.intervals, (self.median_interval, self.min_interval,
-                                      self.max_interval, self.days_since_last,
-                                      self.days_overdue)):
-            for value in base:
-                if value is None:
-                    continue
-                allowed.add(abs(int(value)))
-                for mult in (2, 3, 4, 6, 12, 52):
-                    allowed.add(abs(int(value)) * mult)
-                if int(value) >= 14:
-                    allowed.add(abs(int(value)) // 7)  # "4 weeks" for 28 days
-                if int(value) >= 60:
-                    allowed.add(abs(int(value)) // 30)  # "2 months" for 60 days
-        allowed.update({0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 100})
-        return {value for value in allowed if value >= 0}
-
-
-def _transitions(signals: list[Signal]) -> tuple[tuple[str, str, int], ...]:
-    """Count adjacent signal-type pairs across the whole timeline.
-
-    Only adjacent pairs count. A rule the model states must be about the
-    sequence as it actually played out, not about pairs that happen to co-occur
-    somewhere in the middle.
-    """
-    counts: dict[tuple[str, str], int] = {}
-    for earlier, later in zip(signals, signals[1:]):
-        key = (earlier.signal_type, later.signal_type)
-        counts[key] = counts.get(key, 0) + 1
-    return tuple((a, b, n) for (a, b), n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
-
-
-def compute_facts(signals: list[Signal], clock: EvidenceClock) -> Facts:
-    intervals = tuple(
-        (b - a).days
-        for a, b in zip(signal_dates(signals), signal_dates(signals)[1:])
-    )
-    median = clock.cadence_days
-    overdue = 0
-    if median and clock.age_days > median:
-        overdue = clock.age_days - median
-    return Facts(
-        intervals=intervals,
-        median_interval=median,
-        min_interval=min(intervals) if intervals else None,
-        max_interval=max(intervals) if intervals else None,
-        days_since_last=clock.age_days,
-        days_overdue=overdue,
-        transitions=_transitions(signals),
-        last_three=tuple(
-            f"[{s.date}] ({s.signal_type}) {s.summary}" for s in signals[-3:]
-        ),
-    )
-
-
-def signal_dates(signals: list[Signal]) -> list[date]:
-    parsed = [_parse_iso(signal.date) for signal in signals]
-    return [value for value in parsed if value is not None]
-
-
-def format_facts(facts: Facts) -> str:
-    """The FACTS block. Everything here is computed; nothing is estimated."""
-    lines = ["COMPUTED FACTS (calculated from the timeline above; these are the only",
-             "numbers you may cite — do not compute, estimate, or round your own):"]
-
-    if not facts.intervals:
-        lines.append("- Intervals between signals: not enough signals to measure.")
-    else:
-        lines.append(f"- Intervals between consecutive signals, in days: {list(facts.intervals)}")
-        lines.append(
-            f"- Median interval: {facts.median_interval} days. "
-            f"Shortest: {facts.min_interval} days. Longest: {facts.max_interval} days."
-        )
-        lines.append(
-            f"- Days since the final signal, as of today: {facts.days_since_last}."
-        )
-        if facts.days_overdue > 0:
-            lines.append(
-                f"- OVERDUE BY {facts.days_overdue} DAYS: the stream has been silent for "
-                f"{facts.days_since_last} days against a median interval of "
-                f"{facts.median_interval} days. This is the single most important "
-                f"caveat in this read."
-            )
-        else:
-            lines.append(
-                f"- Not overdue: {facts.days_since_last} days is within the "
-                f"{facts.median_interval}-day median interval."
-            )
-
-    lines.append("")
-    lines.append("Adjacent signal-type transitions and how many times each occurs:")
-    for earlier, later, count in facts.transitions:
-        verdict = (
-            f"occurs {count} times — MAY be called repeating/recurring/a cycle"
-            if count >= 2
-            else f"occurs {count} time — describe as ONE OBSERVED INSTANCE, "
-            f"never as repeating, recurring, a loop, or a cycle"
-        )
-        lines.append(f"  {earlier} -> {later}: {verdict}")
-    if not facts.transitions:
-        lines.append("  (no adjacent transitions: fewer than two signals)")
-
-    lines.append("")
-    lines.append("The three most recent signals, verbatim:")
-    for item in facts.last_three:
-        lines.append(f"  {item}")
-    return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------
@@ -412,14 +273,205 @@ def build_prompt(
     competitor: str, signals: list[Signal], today: date | None = None
 ) -> str:
     clock = evidence_clock(signals, today=today)
-    facts = compute_facts(signals, clock)
+    facts = build_facts(signals, today=clock.today, staleness=clock.staleness)
     return SYNTHESIS_PROMPT.format(
         competitor=competitor,
         numbered_timeline=format_timeline(signals),
         today=clock.today.isoformat(),
         age_sentence=clock.age_sentence,
-        facts_block=format_facts(facts),
+        facts_block=facts.render() + facts.overdue_instruction(),
     ) + GROUNDING_RULES
+
+
+def _coerce_confidence(value: object) -> Confidence:
+    """Map whatever the model produced onto the enum.
+
+    An unrecognised label becomes "low" rather than "none": a read that
+    returned a forecast has *made* an assertion, and downgrading its certainty
+    is the honest reading. "none" is reserved for an actual refusal, which is
+    what `_is_refusal` decides.
+    """
+    text = str(value or "").strip().lower()
+    for candidate in Confidence:
+        if text == candidate.value:
+            return candidate
+    # Tolerate a little decoration: "Confidence: high (one caveat)".
+    for candidate in Confidence:
+        if candidate.value in text:
+            return candidate
+    return Confidence.low
+
+
+def _is_refusal(parsed: dict) -> bool:
+    """Did the model decline to forecast, or assert a low-confidence forecast?
+
+    Only a genuine "no prediction can be made" counts. The distinction matters
+    because a refusal is exempt from the consistency and interval checks — it
+    makes no claim to contradict — but is still required to be calibrated.
+    """
+    prediction = str(parsed.get("predicted_next_move") or "").lower()
+    patterns = str(parsed.get("patterns") or "").lower()
+    haystack = f"{prediction} {patterns}"
+    return bool(
+        re.search(
+            r"no (?:reliable|concrete|specific|credible) prediction|"
+            r"cannot (?:be )?(?:predict|forecast|determine|be determined)|"
+            r"evidence insufficient|insufficient (?:evidence|signal)|"
+            r"too (?:few|little) signals",
+            haystack,
+        )
+    )
+
+
+def _correction_notice(problems: list[str], facts) -> str:
+    """Turn a rejection into a targeted second request.
+
+    Every instruction here has to be one the validators would accept, or the
+    retry is guaranteed to fail the same way. Two were not, and both cost live
+    reads:
+
+    - The notice said confidence must be "one of high/medium/low" while the
+      validator requires "none" for a refusal. A refusal was rejected, told to
+      report one of the three, and rejected again. The allowed set now comes
+      from `validators.allowed_confidence_values`, the same function the
+      validator uses, and `tests/selfcheck.py` asserts the two agree.
+    - The notice listed the authoritative figures but never said the model could
+      not use others, and a retry that fixed one wrong number wrote a different
+      wrong one. It now names the permitted figures explicitly and says to state
+      no figure rather than an unlisted one.
+    """
+    lines = [
+        "YOUR PREVIOUS RESPONSE WAS REJECTED. It will not be shown to a reader. "
+        "The following problems are exactly what the application checks, and the "
+        "response must not contain any of them:",
+    ]
+    for problem in problems:
+        lines.append(f"  - {problem}")
+    lines.append("")
+    if facts.median_interval:
+        lines.append(
+            f"Authoritative figures, copied from the FACTS block: intervals (days) = "
+            f"{facts.intervals}; median = {facts.median_interval}; range = "
+            f"{facts.min_interval}-{facts.max_interval}; days since last signal = "
+            f"{facts.age_days}; days overdue = {facts.days_overdue}."
+        )
+        # The permitted set, so a retry cannot invent a replacement figure. These
+        # are the numbers `check_interval_claims` will accept as a statement about
+        # this stream; anything else has to be omitted or quoted from a signal.
+        permitted = sorted(facts.day_interval_claims())
+        if permitted:
+            lines.append(
+                "If you state a day/week/month figure, it must be one of these "
+                f"numbers of days: {permitted} — the measured intervals, the median, "
+                "the extremes, the age of the evidence and how far overdue it is. "
+                "Do not state any other interval figure, in digits or in words "
+                "('two weeks' is a figure too). The safest choice is to state no "
+                "interval figure at all: the FACTS block already carries them."
+            )
+        repeated = facts.repeated_transitions()
+        single = facts.single_transitions()
+        if repeated:
+            lines.append(
+                "Transitions that DO repeat (you may call these repeating/cycles): "
+                + ", ".join(f"{a}->{b} x{c}" for (a, b), c in sorted(repeated.items()))
+            )
+        if single:
+            lines.append(
+                "Transitions seen ONCE (you may NOT call these repeating/cycles/"
+                "patterns — say 'one observed instance'): "
+                + ", ".join(f"{a}->{b}" for a, b in sorted(single.items()))
+            )
+    forecast = "/".join(validators.allowed_confidence_values(refused=False))
+    lines.append(
+        f"Every predicted date must be after "
+        f"{facts.today.isoformat()}. You must include both \"confidence\" and "
+        f"\"missing_evidence\" (one sentence naming the specific observation that "
+        f"would most raise your confidence). \"confidence\" must be one of "
+        f"{forecast} if you make a forecast. If you decline to forecast, say so in "
+        f"\"predicted_next_move\", and then \"confidence\" must be "
+        f"{validators.allowed_confidence_values(refused=True)[0]!r} — a refusal "
+        f"reported as anything other than that is rejected. A forecast you stand "
+        f"behind and a refusal you state plainly are both acceptable; the rejected "
+        f"answer is the one that hedges without committing either way."
+    )
+    if facts.days_overdue > 0:
+        lines.append(
+            f"The stream is {facts.days_overdue} day(s) overdue. Your "
+            f"\"predicted_next_move\" must say so, and \"confidence\" must not be \"high\"."
+        )
+    return "\n".join(lines)
+
+
+def _unvalidated_response(
+    competitor: str,
+    signals: list[Signal],
+    clock: EvidenceClock,
+    facts,
+    reason: str,
+) -> SynthesisResponse:
+    """Shown when the model failed validation twice.
+
+    Not an error page and not a stub: the deterministic facts plus an explicit
+    statement of what was rejected. A reader sees the real intervals, the real
+    overdue figure, and the reason no narrative is being offered — which is more
+    useful than a fluent forecast that failed its own arithmetic checks.
+    """
+    breakdown: dict[str, int] = {}
+    for signal in signals:
+        breakdown[signal.signal_type] = breakdown.get(signal.signal_type, 0) + 1
+    counts = ", ".join(f"{n} {name}" for name, n in sorted(breakdown.items()))
+
+    rhythm = (
+        f"the median gap between consecutive signals is {facts.median_interval} days "
+        f"(range {facts.min_interval}-{facts.max_interval})"
+        if facts.median_interval
+        else "there is not enough history to measure a rhythm"
+    )
+    overdue = (
+        f"The stream is {facts.days_overdue} day(s) past that rhythm, so this timeline "
+        f"is {clock.staleness}."
+        if facts.days_overdue > 0
+        else f"The stream is within its usual rhythm, so this timeline is {clock.staleness}."
+    )
+
+    return SynthesisResponse(
+        competitor=competitor,
+        patterns=(
+            f"{facts.n} signals recorded ({counts}). Measured intervals in days: "
+            f"{facts.intervals} — {rhythm}. {overdue} Narrative synthesis was generated "
+            f"twice and rejected by the application's validators ({reason}), so it is "
+            f"withheld rather than shown unverified. The measurements above are exact."
+        ),
+        inferred_intent=(
+            "Not inferred. The model did not produce a claim about intent that passed "
+            "the evidence checks, and an unsupported intent is worse than none."
+        ),
+        predicted_next_move=(
+            f"Not predicted. The last signal is dated {clock.as_of} "
+            f"({clock.age_days} day(s) ago) and {overdue.lower()}"
+            if facts.days_overdue > 0
+            else f"Not predicted. The last signal is dated {clock.as_of} ({clock.age_days} day(s) ago)."
+        ),
+        recommendation=(
+            f"Re-run the strategic read, or check the LLM response against the "
+            f"measured facts above: intervals {facts.intervals}, median "
+            f"{facts.median_interval} days."
+        ),
+        confidence=Confidence.none,
+        missing_evidence=(
+            f"A model response that cites only these measured intervals "
+            f"({facts.intervals}) and acknowledges the "
+            f"{facts.days_overdue}-day overdue gap would raise confidence from none."
+        ),
+        narrative_withheld=True,
+        signal_count=len(signals),
+        timeline_window=timeline_window(signals),
+        model_used=f"rejected by validators ({reason[:80]})",
+        data_as_of=clock.as_of,
+        evidence_age_days=clock.age_days,
+        evidence_staleness=clock.staleness,
+        days_overdue=facts.days_overdue,
+    )
 
 
 def _fallback_response(
@@ -451,10 +503,10 @@ def _fallback_response(
             "the stored memory is intact."
         ),
         recommendation="Check GROQ_API_KEY / Groq availability, then re-run the read.",
-        confidence="none",
+        confidence=Confidence.none,
         missing_evidence=(
-            "A successful LLM call: the timeline is intact in Hindsight and the "
-            "narrative can be regenerated without re-logging anything."
+            "A reachable LLM would let the timeline be read; the stored signals "
+            "themselves are complete."
         ),
         signal_count=len(signals),
         timeline_window=timeline_window(signals),
@@ -462,58 +514,7 @@ def _fallback_response(
         data_as_of=clock.as_of,
         evidence_age_days=clock.age_days,
         evidence_staleness=clock.staleness,
-    )
-
-
-def _rejected_response(
-    competitor: str,
-    signals: list[Signal],
-    failures: list[str],
-    clock: EvidenceClock,
-) -> SynthesisResponse:
-    """What we show when a read cannot be trusted.
-
-    Deliberately refusal-shaped rather than silently degraded: it states what
-    went wrong and what would fix it, and declines to predict. Showing a
-    rejected narrative with a warning attached would be worse, because the
-    warning is easy to skim and the confident prose is not.
-    """
-    detail = "; ".join(failures[:3])
-    return SynthesisResponse(
-        competitor=competitor,
-        patterns=(
-            f"This read was withheld: it failed validation against the computed "
-            f"facts for this timeline ({len(signals)} signals, median interval "
-            f"{clock.cadence_days} days). Defects: {detail}. The timeline itself "
-            "is complete and unchanged — only the narrative was rejected."
-        ),
-        inferred_intent=(
-            "Not inferred. An intent read was generated but could not be checked "
-            "against the timeline, so it is not shown."
-        ),
-        predicted_next_move=(
-            "No prediction. A forecast was produced but failed validation, so it "
-            "is withheld rather than shown unchecked."
-        ),
-        recommendation=(
-            "Re-run the strategic read. Validation failures of this kind are "
-            "usually transient model non-compliance; if they persist, the prompt "
-            "and validator disagree about the timeline and the facts block in the "
-            "server log is the place to look."
-        ),
-        confidence="none",
-        missing_evidence=(
-            "A regenerated read that cites only the intervals and transitions in "
-            "the computed facts block."
-        ),
-        signal_count=len(signals),
-        timeline_window=timeline_window(signals),
-        model_used="rejected by validation",
-        data_as_of=clock.as_of,
-        evidence_age_days=clock.age_days,
-        evidence_staleness=clock.staleness,
-        signal_count_validated=False,
-        validation_notes=failures,
+        days_overdue=days_overdue(clock.age_days, clock.cadence_days),
     )
 
 
@@ -536,30 +537,60 @@ def generate_strategic_read(
             inferred_intent="Nothing to infer from an empty memory.",
             predicted_next_move="No basis for a prediction.",
             recommendation="Log the first signals — pricing, hiring, and messaging are the fastest to collect.",
-            confidence="none",
-            missing_evidence="At least four signals spanning more than one type; a single signal cannot show a sequence.",
+            confidence=Confidence.none,
+            missing_evidence="Any signals at all — a single hiring or pricing signal would start the timeline.",
             signal_count=0,
             timeline_window=timeline_window(signals),
             model_used="no retrieval",
             data_as_of=clock.as_of,
             evidence_age_days=clock.age_days,
             evidence_staleness=clock.staleness,
+            days_overdue=0,
         )
 
-    prompt = build_prompt(competitor, signals, today=today)
-    facts = compute_facts(signals, clock)
-    parsed, model_used, validation = _call_and_validate(
-        prompt, facts, signals, clock, competitor
+    facts = build_facts(signals, today=clock.today, staleness=clock.staleness)
+    timeline_text = " ".join(
+        f"{signal.date} {signal.signal_type} {signal.summary}" for signal in signals
     )
-    if parsed is None:
-        if model_used == "rejected by validation":
-            return _rejected_response(competitor, signals, validation.failures, clock)
-        return _fallback_response(
-            competitor, signals, "the LLM was unreachable", clock
+    prompt = build_prompt(competitor, signals, today=today)
+
+    # One retry, then stop trusting the model. The validators exist because the
+    # prompt alone let all seven forecasting reads through uncalibrated, so a
+    # second attempt is worth its cost; a third is not, and returning a
+    # low-confidence read built on the timeline beats returning a bad forecast
+    # dressed up as a good one.
+    problems: list[str] = []
+    parsed: dict = {}
+    model_used = ""
+    for attempt in range(2):
+        try:
+            parsed, model_used = llm_client.call_llm_json(prompt)
+        except LLMError as exc:
+            log.warning("synthesis LLM call failed for %s: %s", competitor, exc)
+            return _fallback_response(competitor, signals, str(exc), clock)
+
+        if attempt == 0 and problems:
+            pass
+        problems = validate_response(
+            parsed, facts, timeline_text, refused=_is_refusal(parsed)
+        )
+        if not problems:
+            break
+        log.warning(
+            "synthesis read for %s rejected on attempt %d: %s",
+            competitor, attempt + 1, "; ".join(problems[:4]),
+        )
+        if attempt == 0:
+            # Tell the model exactly what was wrong rather than hoping a rerun
+            # lands differently.
+            prompt = prompt + "\n\n" + _correction_notice(problems, facts)
+
+    if problems:
+        return _unvalidated_response(
+            competitor, signals, clock, facts,
+            reason="; ".join(problems[:3]),
         )
 
-    # Coerce defensively: a missing or null field should degrade one section,
-    # not blank the whole read.
     def field(name: str) -> str:
         value = parsed.get(name)
         if isinstance(value, list):
@@ -573,7 +604,7 @@ def generate_strategic_read(
         inferred_intent=field("inferred_intent"),
         predicted_next_move=field("predicted_next_move"),
         recommendation=field("recommendation"),
-        confidence=field("confidence").lower(),
+        confidence=_coerce_confidence(parsed.get("confidence")),
         missing_evidence=field("missing_evidence"),
         signal_count=len(signals),
         timeline_window=timeline_window(signals),
@@ -581,46 +612,5 @@ def generate_strategic_read(
         data_as_of=clock.as_of,
         evidence_age_days=clock.age_days,
         evidence_staleness=clock.staleness,
-        signal_count_validated=validation.ok,
-        validation_notes=validation.failures,
-    )
-
-
-def _call_and_validate(
-    prompt: str,
-    facts: Facts,
-    signals: list[Signal],
-    clock: EvidenceClock,
-    competitor: str,
-):
-    """Call the model, validate, and retry once with the defects quoted back.
-
-    A read that fails validation twice is replaced rather than shown: the
-    reader cannot see the validation, so an untrustworthy read reads exactly
-    like a trustworthy one.
-    """
-    from . import validators
-
-    last_failures: list[str] = []
-    for attempt in (1, 2):
-        try:
-            parsed, model_used = llm_client.call_llm_json(prompt)
-        except LLMError as exc:
-            log.warning("synthesis LLM call failed for %s: %s", competitor, exc)
-            return None, "fallback (no LLM)", validators.ValidationResult(ok=True)
-        fields = {k: str(parsed.get(k) or "") for k in
-                  ("patterns", "inferred_intent", "predicted_next_move",
-                   "recommendation", "confidence", "missing_evidence")}
-        validation = validators.validate_read(fields, facts, signals, clock.today)
-        if validation.ok:
-            return parsed, model_used, validation
-        last_failures = validation.failures
-        log.info(
-            "synthesis validation rejected read for %s (attempt %s/%s): %s",
-            competitor, attempt, 2, "; ".join(validation.failures),
-        )
-        if attempt == 1:
-            prompt = validators.retry_prompt(prompt, last_failures)
-    return None, "rejected by validation", validators.ValidationResult(
-        ok=False, failures=last_failures
+        days_overdue=facts.days_overdue,
     )

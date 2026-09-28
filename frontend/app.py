@@ -83,6 +83,31 @@ def type_badge(signal_type: str) -> str:
     )
 
 
+# Confidence is a claim about the read, not decoration, so it gets a badge rather
+# than a word buried in prose. The colours are ordered by how much weight the
+# answer can bear, and "none" is grey and hollow to mark a refusal — an absence
+# of a forecast, which is a different thing from a weak one.
+CONFIDENCE_STYLES = {
+    "high": ("#15803d", "#dcfce7", "▲", "high confidence"),
+    "medium": ("#a16207", "#fef9c3", "◆", "medium confidence"),
+    "low": ("#c2410c", "#ffedd5", "▼", "low confidence"),
+    "none": ("#6b7280", "#f3f4f6", "—", "no prediction made"),
+}
+
+
+def confidence_badge(confidence: str | None) -> str:
+    fg, bg, glyph, label = CONFIDENCE_STYLES.get(
+        str(confidence or "none").strip().lower(),
+        CONFIDENCE_STYLES["none"],
+    )
+    return (
+        f'<span style="background:{bg};color:{fg};border:1px solid {fg}33;'
+        f'border-radius:10px;padding:3px 11px;font-size:11px;font-weight:700;'
+        f'letter-spacing:.4px;text-transform:uppercase;white-space:nowrap">'
+        f"{glyph} {label}</span>"
+    )
+
+
 # --------------------------------------------------------------------------
 # Page setup
 # --------------------------------------------------------------------------
@@ -319,10 +344,26 @@ else:
                 st.error(f"Strategic read failed: {exc}")
             else:
                 meta_col1, meta_col2 = st.columns([3, 2])
+                # The count appears once, here. timeline_window carries the
+                # date span only — it used to repeat the count, which rendered
+                # as "Built from 9 signals (start to end (9 signals))".
                 meta_col1.caption(
                     f"Built from **{read['signal_count']} signals** "
                     f"({read['timeline_window']}) via `{read['model_used']}`"
                 )
+                meta_col2.caption(confidence_badge(read.get("confidence", "none")))
+                # The model was asked twice and failed the validators both times.
+                # The read below is the measured facts, not a narrative, and saying
+                # so is the difference between an honest degraded answer and a
+                # broken one. The reason is already in the caption above.
+                if read.get("narrative_withheld"):
+                    st.warning(
+                        "**Narrative withheld.** The model was asked twice and both "
+                        "responses were rejected by the validators, so no forecast is "
+                        "shown. What follows is the application's own measurement of "
+                        "this timeline — exact, and not a prediction. The reason is in "
+                        "the `via` note above."
+                    )
                 # Surface evidence freshness next to the read. Without it a
                 # forecast drawn from a timeline that stopped weeks ago reads
                 # exactly like a live one, which is the whole failure mode the
@@ -346,6 +387,29 @@ else:
                         )
                     else:
                         st.caption(f"Evidence current as of {as_of} ({age} days old).")
+
+                # How far past its own rhythm the last signal sits. Distinct
+                # from the age: 40 days is unremarkable for a quarterly
+                # competitor and badly overdue for a weekly one, and the reader
+                # needs the difference to weigh the forecast.
+                overdue = read.get("days_overdue") or 0
+                if overdue > 0:
+                    st.info(
+                        f"**Overdue by {overdue} day(s).** No signal has arrived for "
+                        f"{overdue} day(s) beyond this competitor's usual rhythm. Any "
+                        "timing below is an extrapolation from a rhythm that has "
+                        "already broken, not a schedule."
+                    )
+
+                # What would settle it. Shown next to the read rather than
+                # buried in it, because a forecast that names the observation
+                # which would confirm or refute it is the one a reader can act
+                # on — and the name of that observation is also the thing to go
+                # and collect.
+                missing = read.get("missing_evidence")
+                if missing:
+                    st.caption(f"**What would raise confidence:** {missing}")
+
                 for title, key, icon in SECTIONS:
                     st.markdown(
                         f'<div class="ss-sec"><div class="ss-sec-t">{icon} {title}</div>'

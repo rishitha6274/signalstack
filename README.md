@@ -114,7 +114,7 @@ Two independent guards keep a derived row off the timeline regardless: the `all_
 python tests/selfcheck.py
 ```
 
-140 checks, no network, no credits. It runs the real application code against `tests/hindsight_double.py` — a double built from the published OpenAPI (`info.version 0.10.1`), not a mock that returns whatever the app happens to want. It enforces the rules a naive mock skips:
+275 checks, no network, no credits. It runs the real application code against `tests/hindsight_double.py` — a double built from the published OpenAPI (`info.version 0.10.1`), not a mock that returns whatever the app happens to want. It enforces the rules a naive mock skips:
 
 - `MemoryItem.metadata` values must be **strings**; a nested object is a 422
 - `MemoryItem.content` is required
@@ -124,6 +124,10 @@ python tests/selfcheck.py
 - missing banks are 404; invalid `tags_match` / `time_field` are 422
 
 It then exercises the seeded dataset, idempotent re-seeding, timeline ordering, synthesis grounding, thin-competitor refusal, time anchoring and evidence staleness, live ingestion, and each malformed-LLM recovery path.
+
+The last two sections are the ones worth trusting. Section 9 replays five specific defects found by auditing the real 10-competitor run — an unsupported "repeats three times", a silent 26-day gap, a skipped cycle stage, a confident read with no confidence field, a fabricated 30-day cadence — and pins the current behaviour against each. Section 10 then deletes each new rule from the source, in a mutated copy of the module, and asserts the corresponding test **stops firing**: 33 mutations, each of which must break something, so none of those tests can pass for the wrong reason. A check that fails on the real code is a bug; a check that still passes with its own rule deleted is a test that proves nothing.
+
+Seven of those mutations re-introduce defects found by the *second* audit, verbatim: a refusal allowed to report `high`/`medium`/`low`, the retry notice asking the wrong end of the confidence contract, the permitted-number list dropped from the notice, a withheld narrative not flagged as withheld, the digits-only interval pattern, the indefinite article read as the quantity, and the cadence cue that keeps "within a month" from being read as a measured cadence. Each is pinned to the test that caught it, so the fix cannot be reverted silently.
 
 It is not a substitute for a live run — it proves the client matches the documented contract, not that your account is provisioned. Run it first, then point at real Hindsight.
 
@@ -286,6 +290,80 @@ Optional: the **Log a new signal** expander shows live ingestion — paste a raw
 
 ---
 
+## The numbers are computed, not requested
+
+The original version of this app asked Groq for a strategic read and trusted the answer. Auditing the real 10-competitor output showed what that costs: a cadence invented as "roughly every 30 days" against a measured 28, a "repeats three times" claim where a transition occurred twice, a forecast dated after the evidence had already gone stale, and reads that stated a probability without ever naming their own confidence.
+
+So the arithmetic now happens in Python, in `backend/facts.py`, and the result is handed to the model as a block it must obey rather than a question it must answer.
+
+Real output for Nimbus AI, computed on 2026-09-28:
+
+```
+FACTS (computed by the application — use these, do not recompute them):
+- signal count: 12
+- today's date: 2026-09-28
+- most recent signal: 2026-08-19
+- days since the most recent signal: 40
+- intervals in days between consecutive signals, in order: [9, 6, 6, 13, 22, 21, 14, 14, 21, 21, 35]
+- median interval: 14 days (range 6-35 days)
+- days overdue: 26 (the stream is 26 day(s) past its 14-day rhythm)
+- transitions that DO repeat (>=2 occurrences): feature -> hiring occurs 2 time(s)
+- transitions seen only ONCE (say 'one observed instance', never 'repeating'/'a cycle'):
+  funding -> messaging occurs once, hiring -> feature occurs once, ... (9 in total)
+- the three most recent signals, verbatim:
+    [2026-06-24] (hiring) Nimbus AI opens three strategic-enterprise roles including a
+    Field Engineer, a Strategic Account Executive and a second Solutions Architect.
+    [2026-07-15] (messaging) Nimbus AI launches a 'Built for the Enterprise' campaign and
+    teasers an Enterprise tier on the pricing page.
+    [2026-08-19] (pricing) Nimbus AI publishes an Enterprise tier and restricts the 20%
+    volume discount to Enterprise contracts, ending self-serve volume pricing.
+```
+
+and, appended to the prompt only when the stream is actually late:
+
+```
+- The stream is 26 day(s) past its 14-day rhythm. "predicted_next_move" MUST say how far
+  overdue it is, and "confidence" MUST NOT be "high".
+```
+
+Note what the second line of that block says: the one transition the model may describe as repeating is `feature -> hiring`, twice. "Repeats three times" has nothing to be true of, and the nine one-off transitions are named individually so they cannot be quietly promoted into a cycle.
+
+Five things follow from that block being authoritative:
+
+- **A cadence claim is checked against the measured intervals.** `check_interval_claims` accepts a number if it is one of the intervals, one of the stream's other derived figures (age, overdue, median, extremes), within ±2 days of one, or stated as a *duration* in the evidence. Units are handled separately, and so are the two directions: "about a month" is converted to 30–31 days against Brightline's 28-day median and accepted, and a bare "30 days" is accepted for the same reason — but "10 day cadence" is not, because day claims are matched only against day figures, and the tolerance window would otherwise bridge units and let Brightline's 84-day age satisfy a 10-day claim as 12 weeks.
+- **The spelling of a number does not decide whether it is checked.** "2 weeks" was checked while "two weeks" was not, so the same claim got a different verdict by spelling — the rule depended on the number format, not on the fact. Amounts are now read in digits and in words, so "two weeks", "a fortnight" and "a month" are measured exactly as "14 days" and "1 month" are. The indefinite article is the one exception, and it is an exception for a reason: a bare "a month" is ambiguous between a cadence and a forecast horizon, so it counts as a measured claim only when a cadence cue is near it ("every month", "a month between signals"), while "expect a launch within a month" is left alone. A specific figure is a measurement whichever way it is spelled. The article is also not read as a quantity — "a 28 day cadence" is 28 days, not 1 and 28.
+- **A date in the prediction is checked against the real signal dates.** A past ISO date is allowed only when it is an actual signal date, or when the sentence around it is narrative ("the 2026-04-02 launch was never announced") rather than a deadline. "They will ship by 2026-08-03", said on 2026-09-28, is rejected however confident it sounds.
+- **Repetition is priced.** Only transitions occurring at least twice appear in the block, so "repeats three times" has nothing to be true of.
+- **Staleness caps confidence.** An overdue stream may not be reported as `high`.
+- **Every read carries `confidence` and `missing_evidence`.** A refusal that is not explicit about what it does not know is a refusal the reader cannot act on.
+
+When a check fails, the response is **not** silently accepted and is not thrown away: the specific failures are appended to the prompt and the model is asked once more, which usually produces the corrected read. If the retry also fails, the response is a deterministic read rather than a narrative — HTTP 200, `confidence: none`, `narrative_withheld: true`, the real intervals and overdue figure in `patterns`, and the validator's own complaint in `model_used` and in the sentence explaining why the narrative is being withheld. The UI shows the withheld reason and what would raise confidence. The alternative — returning the second unverified attempt — is the behaviour the audit was written against.
+
+This means a wrong number is either fixed or visibly absent. It is never presented as a finding.
+
+### The retry has to be able to succeed
+
+A retry is only worth sending if the instructions it carries would actually pass the validator that rejected the first attempt. The first version did not, and the audit found the cost in live output: two reads were rejected for reporting `high`/`medium`/`low` on a refusal the validator required to be `none` — the notice told the model to do exactly what the validator had just refused — and a third retry fixed its overdue gap and then invented a different wrong interval, because the notice listed the true figures without saying the list was closed.
+
+So the rules the retry is told are now the rules the validator runs:
+
+- **One contract, asked for by the code that enforces it.** `validators.allowed_confidence_values(refused)` is the only statement of which confidence values are legal, `_correction_notice` builds its instruction from it, and the selfcheck parses the finished notice back and asserts that each branch names exactly the values the validator accepts for that branch. A refusal's branch naming the graded levels — the original defect — fails the suite, and there is a mutation that re-introduces it.
+- **The permitted figures are enumerated, and the enumeration is closed.** The notice lists the exact day counts `check_interval_claims` will accept for this competitor, and says the list is the whole set. The selfcheck then feeds every number on that list back through the interval check, so the notice cannot offer a figure the validator would reject.
+- **A failed retry is never an error response.** It is a 200, flagged `narrative_withheld`, carrying the measured facts. A reader sees a weaker answer and the reason for it, not a stack trace and not a silent pass.
+
+### Honesty rules for the model itself
+
+Two of the rules cannot be expressed as a post-hoc check and stay in the prompt, where the mutation suite records them as such:
+
+- the forecast must follow or explicitly break the last cycle stage, and must be consistent with the **last three signals verbatim**;
+- when `patterns` reports insufficient evidence, the prediction must decline and name the signal that would settle it, and the recommendation must be to keep collecting.
+
+### Seeding is opt-in
+
+`AUTOSEED` defaults to **off**. A fresh local checkout therefore starts empty rather than silently appearing to have memory, and only `Dockerfile` and `render.yaml` set `AUTOSEED=1`, where an empty first deploy has to bootstrap itself from the seed file. To seed locally, run `python scripts/seed_data.py --verify` once you have a key.
+
+---
+
 ## Robustness
 
 The brief warns that Groq's `gpt-oss` models intermittently produce malformed or tool-call-shaped responses. `backend/llm_client.py` handles it, and the paths below are all exercised:
@@ -296,6 +374,7 @@ The brief warns that Groq's `gpt-oss` models intermittently produce malformed or
 - **Truncated completion** (stop token mid-JSON, including nested) → salvaged: close the open string, drop the dangling incomplete pair, append exactly the missing closers. Verified against `{"a":1,"b":{"c":"cut` and similar.
 - **Trailing commas, single quotes, smart quotes** → repaired in escalating order of desperation, and only when a strict parse has already failed. An apostrophe in prose is never mangled into a delimiter.
 - **LLM fully unavailable** → `ingestion.py` falls back to a keyword/date heuristic and still writes a usable signal; `synthesis.py` returns an honest degraded read that reports the span and per-type counts instead of pretending.
+- **Rate limited (HTTP 429)** → `RateLimitError` is raised rather than retried blindly. `backend/llm_client.py` honours `Retry-After` first, then Groq's in-body hint (`Rate limit reached... try again in 34.98s`), then a 20-second default, capped at 75s. The earlier behaviour — an immediate second attempt — is what turned a rate limit into a hard failure on the demo.
 - **Signal date ambiguity** → `03/04/2026` is read as US month-first; `13/04/2026` can only be day-first. Separators (`/`, `.`, `-`) are normalised so one format list covers all of them.
 - **Hindsight unreachable** → the API returns `502` with the underlying error, and the UI reports it rather than rendering an empty timeline.
 

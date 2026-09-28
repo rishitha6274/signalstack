@@ -1,449 +1,427 @@
-"""Post-hoc validation of a strategic read.
+"""Post-hoc validators for a strategic read.
 
-The prompt tells the model the rules. Nothing in the prompt *enforces* them, and
-the audit showed why: seven of seven forecasting reads came back with no
-confidence label, and six stated a cadence their own timeline contradicted. A
-model will comply with a rule it can see and ignore one it can weigh against
-finishing the sentence.
+A prompt rule is a request. These are checks. Each one exists because the audit
+of all ten competitors caught the model breaking the corresponding rule in the
+wild, and each returns the reason it rejected so the caller can log something
+actionable rather than "invalid".
 
-So the rules that can be checked mechanically are checked mechanically here.
-A read that fails is retried once with the failures quoted back, then replaced
-by a refusal-shaped response. A read that cannot be trusted is worse than no
-read, because the reader has no way to tell.
-
-Each check maps to a failure mode from the audit:
-
-  A  repetition  — a repeating/cycle/loop claim whose transition the facts
-                   show fewer than twice
-  B  staleness   — a forecast on an overdue stream that neither mentions the
-                   gap nor drops below high confidence
-  C  trend       — a prediction that skips a stage of the model's own declared
-                   cycle without explaining why
-  D  calibration — a missing confidence or missing_evidence field, or a quote
-                   that is not verbatim in the timeline
-  E  arithmetic  — a cadence, interval, or predicted date the facts do not
-                   support
+The validators are deliberately conservative about *what counts as a number*.
+A false rejection costs a retry and then a downgraded answer, so the parsers
+accept anything plausibly derived from the FACTS block and reserve rejection for
+numbers that are demonstrably absent from it. Being wrong in the permissive
+direction is the lesser evil: a number that happens to be a coincidence rather
+than a real fabrication passes, and the rest of the suite still holds.
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
 from datetime import date
+from typing import Iterable
 
-from .models import Signal
-from .synthesis import Facts
+from .facts import TimelineFacts
 
-# Words that assert a sequence repeats. Deliberately narrow: "pattern" on its
-# own can describe a single arrangement, and flagging it produced false failures
-# on reads that were merely describing a shape once.
-REPEAT_CLAIM = re.compile(
-    r"\b(repeats?|repeated|repeating|recurring|recurs|a\s+loop|loops|cyclic|"
-    r"a\s+cycle|cycles|rotation|rotates|every\s+\w+\s+days?|each\s+time)\b",
-    re.I,
-)
-SINGLE_INSTANCE = re.compile(
-    r"\bone\s+observed\s+instance|single\s+instance|one\s+instance|"
-    r"one\s+occurrence|only\s+once|appears?\s+once", re.I
-)
-GAP_ACK = re.compile(
-    r"\boverdue\b|\bsince\s+the\s+(?:last|final|most\s+recent)\b|"
-    r"no\s+signal\s+(?:has\s+)?(?:since|for)\b|has\s+not\s+(?:produced|emitted|shipped|published)\b|"
-    r"gone\s+quiet|quiet\s+for|quiet\s+since|\bsilence\b|\bsilent\b|"
-    r"stal(?:e|eness)\b|\bgap\s+of\b|\b\d+\s+days?\s+(?:since|without|overdue)\b|"
-    r"\bsince\s+\d{4}-\d{2}-\d{2}\b|"
-    r"\bsince\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep)[a-z]*\s+\d{1,2}\b",
-    re.I,
-)
-QUOTE = re.compile(r"['\"‘’“]([^'\"’”\n]{4,80})['\"’”]")
-HYPOTHETICAL = re.compile(
-    r"(e\.g\.|i\.e\.|such\s+as|for\s+example|like\s+['\"]|such\s+a)", re.I
-)
-# A named label the model coined for a sequence it is describing. These are not
-# quotes from the timeline and must not be checked as such.
-COINED = re.compile(
-    r"^[\w\s-]{0,30}(cycle|monetisation|monetization|cadence|phase|stage|"
-    r"pattern|shift|motion|move|moves|arc|build-then-monetize)[\w\s-]{0,20}$", re.I
-)
-ISO_DATE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
-NUM_UNIT = re.compile(r"\b(\d+)\s*[-–]?\s*(day|week|month|interval|signal)s?\b", re.I)
-CONF_LEVELS = ("high", "medium", "low", "none")
-WORD_NUMBERS = {
-    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+CONFIDENCE_VALUES = ("high", "medium", "low", "none")
+
+# A quoted run of words. Deliberately naive about which quote mark opened it:
+# the point is to catch invented quotations, not to adjudicate typography.
+_QUOTE = re.compile(r"['\"\u2018\u201c]([^'\"\u2019\u201d\n]{6,120})['\"\u2019\u201d]")
+
+# Spelled-out amounts a duration can be written with. Defined before _INTERVAL
+# because that pattern embeds them.
+_NUMBER_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
+    "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "a": 1,
+    "an": 1, "couple of": 2, "a couple of": 2,
 }
-UNIT_DAYS = {"day": 1, "week": 7, "month": 30}
 
-# Signal-type vocabulary. Order matters: "messaging" must be tested before the
-# bare "message" stem so a type is not mis-parsed as free prose.
-TYPE_WORDS = (
-    "funding", "hiring", "pricing", "messaging", "feature",
-    "launch", "announce", "hire", "price", "release", "ship",
+# An integer, optionally with a decimal, adjacent to a day/week/month unit, or
+# bare when the sentence is clearly about timing. Bare integers are NOT
+# collected: "three times", "two weeks", "5 roles" and "the fourth signal" are
+# prose, and catching those would reject nearly every good answer.
+#
+# The amount may be spelled out. It must be: this pattern was digits-only, so
+# "2 weeks" was checked and "two weeks" was not, and the same claim got a
+# different verdict by spelling. A live read was rejected for saying "14 days"
+# while "two weeks" would have passed untouched.
+_NUM = (r"\d+(?:\.\d+)?|"
+        + "|".join(sorted(_NUMBER_WORDS, key=len, reverse=True)))
+_INTERVAL = re.compile(
+    rf"({_NUM})\s*(?:-|–|—|to)?\s*({_NUM})?\s*"
+    r"(day|week|month|fortnight)s?\b",
+    re.I,
 )
-STAGE_PATTERNS = (
-    ("funding", r"\bfund(?:ing|ed|raise|raises|round)\b"),
-    ("hiring", r"\bhir(?:ing|e|ed|es)\b|\broles?\b|\bjobs?\b|\bheadcount\b"),
-    ("pricing", r"\bpric(?:ing|e|ed|es|tier|tiers)\b|\bdiscount\b|\bbundle[ds]?\b|\bfee[s]?\b"),
-    ("messaging", r"\bmessag(?:ing|e|ed|es)\b|\bcampaign\b|\brebrand(?:ing|ed)?\b|\bpositioning\b"),
-    ("feature", r"\bfeature[s]?\b|\bship(?:s|ped|ping)?\b|\brelease[ds]?\b|\blaunch(?:es|ed)?\b"),
+# A month-like target, optionally with a day: "October 2026", "Oct 2026",
+# "15 October 2026", "2026-10-15".
+_MONTH = re.compile(
+    r"\b(\d{4}-\d{2}-\d{2})\b"
+    r"|\b(\d{1,2})\s+(January|February|March|April|May|June|July|August|September|"
+    r"October|November|December)\s+(\d{4})\b"
+    r"|\b(January|February|March|April|May|June|July|August|September|October|"
+    r"November|December)\s+(\d{4})\b",
+    re.I,
+)
+_MONTHS = {
+    "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
+    "july": 7, "august": 8, "september": 9, "october": 10, "november": 11,
+    "december": 12,
+}
+
+# A duration the evidence actually states, in days. Deliberately requires a
+# unit: "20 days" is a citation, "20" is a number, and the difference is the
+# whole point (see check_interval_claims).
+_DURATION = re.compile(
+    r"(\d{1,4}(?:\.\d+)?|" + "|".join(sorted(_NUMBER_WORDS, key=len, reverse=True)) +
+    r")\s*(hour|day|week|month|fortnight)s?\b",
+    re.I,
+)
+_DURATION_DAYS = {
+    "hour": 1 / 24, "day": 1, "week": 7, "fortnight": 14, "month": 30,
+}
+
+# Words that make a duration a claim about the competitor's rhythm rather than a
+# forecast horizon. Only consulted for the indefinite form ("a month"), which is
+# ambiguous on its own: "expect a launch within a month" is a horizon and "every
+# month" is a cadence. A specific figure ("14 days", "two weeks") is a
+# measurement whichever way it is spelled, so it is always checked.
+_CADENCE_CUE = re.compile(
+    r"cadence|rhythm|every|interval|spaced|spacing|apart|between|gap|median|"
+    r"last signal|as of|past|since|apart from",
+    re.I,
 )
 
 
-def _parse_iso(value: str) -> date | None:
+def _as_amount(value: str | None) -> float | None:
+    """A duration amount as a number, whether written as a digit or a word."""
+    if value is None:
+        return None
+    text = value.strip().lower()
+    if text in _NUMBER_WORDS:
+        return float(_NUMBER_WORDS[text])
     try:
-        return date.fromisoformat(str(value)[:10])
-    except (ValueError, TypeError):
+        return float(text)
+    except ValueError:
         return None
 
 
-def _number(token: str) -> int | None:
-    token = token.strip().lower()
-    if token.isdigit():
-        return int(token)
-    return WORD_NUMBERS.get(token)
+def _stated_durations(evidence: str) -> set[int]:
+    """Every duration the evidence states, normalised to whole days.
 
-
-@dataclass
-class ValidationResult:
-    ok: bool
-    failures: list[str] = field(default_factory=list)
-    modes: set[str] = field(default_factory=set)
-
-    def note(self, mode: str, message: str) -> None:
-        self.ok = False
-        self.modes.add(mode)
-        self.failures.append(f"[{mode}] {message}")
-
-
-def is_refusal(text: str) -> bool:
-    """A read that declines to predict. Treated as valid, not as a failure."""
-    blob = " ".join(text).lower()
-    return bool(
-        re.search(
-            r"evidence insufficient|insufficient evidence|insufficient signal|"
-            r"cannot determine|cannot infer|no (?:concrete|reliable) prediction|"
-            r"not predictable|cannot be made", blob
-        )
-    )
-
-
-def _sentences(text: str) -> list[str]:
-    return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text or "") if s.strip()]
-
-
-def check_arithmetic(
-    result: ValidationResult,
-    text: str,
-    facts: Facts,
-    today: date,
-    signal_dates: set[str],
-) -> None:
-    """E: every cited number and date must be supported by the facts."""
-    allowed = facts.allowed_numbers
-
-    for match in NUM_UNIT.finditer(text):
+    Expressed as a set of day values so a claim is exempt only when the
+    evidence gives that figure a unit. Years, prices, percentages and headcounts
+    therefore do not license a cadence, and a bare number is never a citation.
+    """
+    out: set[int] = set()
+    for match in _DURATION.finditer(_norm(evidence or "").lower()):
         raw, unit = match.group(1), match.group(2).lower()
-        value = _number(raw)
-        if value is None:
-            continue
-        days = value * UNIT_DAYS[unit]
-        # A horizon ("within 6 weeks") is a forecast window, not a measurement
-        # of the timeline. Those are checked against today below instead.
-        context = text[max(0, match.start() - 30): match.end() + 12]
-        if re.search(r"within|next\s+\w+\s+(?:to|-)\b|by\s+the", context, re.I):
-            continue
-        if days in allowed:
-            continue
-        # A claimed range: judge it by whether the real intervals fit inside it.
-        low, high = _enclosing_range(text, match, unit)
-        if low is not None:
-            span = (high - low) * UNIT_DAYS[unit]
-            if low * UNIT_DAYS[unit] <= span and _range_contains_all(low, high, unit, facts):
+        amount = _NUMBER_WORDS.get(raw, None)
+        if amount is None:
+            try:
+                amount = float(raw)
+            except ValueError:
                 continue
-        result.note(
-            "E",
-            f'cites "{match.group(0).strip()}" but the computed intervals are '
-            f"{list(facts.intervals)} (median {facts.median_interval}); "
-            "only numbers in the FACTS block may be quoted",
-        )
+        out.add(int(round(amount * _DURATION_DAYS[unit])))
+    return out
 
-    for token in ISO_DATE.findall(text):
-        parsed = _parse_iso(token)
-        if parsed is None:
-            result.note("E", f"cites an unparseable date {token!r}")
-            continue
-        if parsed > today:
-            continue  # a forward-looking target: allowed
-        if token not in signal_dates:
-            result.note(
-                "E",
-                f"cites past date {token}, which is not a signal date; "
-                "past dates may only be referenced as evidence that exists in the timeline",
-            )
-
-    # A cadence continuation that lands in the past while the model forecasts
-    # forward. This is the Brightline failure: last signal + 28 days was six
-    # weeks ago, and the read named a date three months out with no accounting.
-    for match in re.finditer(
-        r"(?:next\s+expected|would\s+be\s+due|the\s+next\s+signal[^.]{0,40})"
-        r"[^.]{0,60}?(\d+)\s*days?\s*later", text, re.I
-    ):
-        span = int(match.group(1))
-        if not facts.intervals or facts.days_since_last == 0:
-            continue
-        implied = facts.days_since_last - span
-        if implied >= 0 and span == facts.median_interval:
-            result.note(
-                "E",
-                f"describes a next signal {span} days after the last one, which is "
-                f"{-implied} days ago (the stream is {facts.days_since_last} days old), "
-                "then forecasts forward without accounting for the skipped cycles",
-            )
+# Hedging language that legitimately accompanies an unquoted, coined label.
+# All four narrative fields are scanned, not just the two evidence fields: an
+# invented quotation in the recommendation is exactly as misleading to a reader
+# as one in the patterns, and the rule as written only covered half the answer.
+_NARRATIVE_FIELDS = ("patterns", "inferred_intent", "predicted_next_move",
+                     "recommendation")
 
 
-def _enclosing_range(text: str, match: re.Match, unit: str) -> tuple[int, int] | None:
-    window = text[max(0, match.start() - 12): match.end() + 12]
-    pair = re.search(r"(\d+)\s*[-–to]+\s*(\d+)\s*" + unit, window, re.I)
-    if pair:
-        return int(pair.group(1)), int(pair.group(2))
+def _norm(value: str) -> str:
+    """Fold the unicode punctuation models actually emit into ASCII."""
+    return (
+        value.replace("\u2011", "-")
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+        .replace("\u2018", "'")
+        .replace("\u2019", "'")
+        .replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .replace("\u00a0", " ")
+    )
+
+
+def _as_date(match: re.Match) -> date | None:
+    groups = match.groups()
+    if groups[0]:
+        try:
+            return date.fromisoformat(groups[0])
+        except ValueError:
+            return None
+    if groups[1] and groups[2] and groups[3]:
+        month = _MONTHS.get(groups[2].lower())
+        if not month:
+            return None
+        try:
+            return date(int(groups[3]), month, int(groups[1]))
+        except ValueError:
+            return None
+    if groups[4] and groups[5]:
+        month = _MONTHS.get(groups[4].lower())
+        if not month:
+            return None
+        try:
+            return date(int(groups[5]), month, 1)
+        except ValueError:
+            return None
     return None
 
 
-def _range_contains_all(low: int, high: int, unit: str, facts: Facts) -> bool:
-    """True when every real interval lies inside the claimed range."""
-    mult = UNIT_DAYS[unit]
-    if not facts.intervals:
-        return False
-    return all(low * mult - 1 <= gap <= high * mult + 1 for gap in facts.intervals)
+def allowed_confidence_values(refused: bool) -> tuple[str, ...]:
+    """The confidence values a response may report, for this case.
+
+    The single source of truth for the calibration contract. `synthesis.py` builds
+    its correction notice from this function rather than restating the rule, and
+    `tests/selfcheck.py` asserts the notice satisfies it. That assertion is not
+    belt-and-braces: the first version of the notice hardcoded "high/medium/low"
+    while the validator demanded "none" for a refusal, so a refusal was rejected,
+    told to report one of the three, and rejected again on the retry. A live run
+    lost two reads to exactly that, and a third to a refusal the notice had
+    provoked. Two copies of a rule is one copy too many.
+    """
+    return ("none",) if refused else ("high", "medium", "low")
 
 
-def check_repetition(result: ValidationResult, text: str, facts: Facts) -> None:
-    """A: a sequence may only be called repeating if the facts show it twice."""
-    if not facts.transitions:
-        return
-    repeatable = facts.repeatable_transitions
-    for sentence in _sentences(text):
-        if not REPEAT_CLAIM.search(sentence):
-            continue
-        if SINGLE_INSTANCE.search(sentence):
-            continue
-        # Which transition is this sentence about? Look for a type pair, else
-        # fall back to the single most frequent transition.
-        cited = _transition_in_sentence(sentence)
-        if cited is None:
-            continue
-        if cited in repeatable:
-            continue
-        count = next((n for a, b, n in facts.transitions if (a, b) == cited), 0)
-        result.note(
-            "A",
-            f'"{sentence}" calls a {cited[0]} -> {cited[1]} sequence repeating, '
-            f"but the computed transitions show it occurs {count} time(s); "
-            "a sequence seen once must be called 'one observed instance'",
-        )
+def check_confidence_present(response: dict, facts: TimelineFacts) -> list[str]:
+    """D: the read must state how confident it is."""
+    problems: list[str] = []
+    value = response.get("confidence")
+    if value is None or not str(value).strip():
+        problems.append("confidence is absent")
+    else:
+        normalised = str(value).strip().lower()
+        if normalised not in CONFIDENCE_VALUES:
+            problems.append(
+                f"confidence must be one of {CONFIDENCE_VALUES}, got {normalised!r}"
+            )
+    missing = response.get("missing_evidence")
+    if missing is None or not str(missing).strip():
+        problems.append("missing_evidence is absent")
+    return problems
 
 
-def _transition_in_sentence(sentence: str) -> tuple[str, str] | None:
-    """Find the (from, to) signal-type pair a sentence is about."""
-    found = [(m.start(), m.lastindex) for m in re.finditer("|".join(TYPE_WORDS), sentence, re.I)]
-    types = [sentence[m.start() if isinstance(m.start(), int) else 0] for m in []]
-    # Simpler: walk the matched words in order and map them to signal types.
-    words: list[tuple[int, str]] = []
-    for word in TYPE_WORDS:
-        for m in re.finditer(rf"\b{word}\w*\b", sentence, re.I):
-            words.append((m.start(), word))
-    words.sort()
-    mapped: list[str] = []
-    for _, word in words:
-        for canonical, pattern in STAGE_PATTERNS:
-            if re.fullmatch(pattern, word, re.I):
-                mapped.append(canonical)
-                break
-    if len(mapped) >= 2:
-        return (mapped[0], mapped[1])
-    return None
+def check_refusal_calibrated(
+    response: dict, facts: TimelineFacts
+) -> list[str]:
+    """D: a refusal is held to the calibration rules and nothing else.
+
+    A refusal has no forecast to check against the timeline, so it is exempt
+    from the interval, quote and date rules. It is not exempt from saying how
+    confident it is, which for a refusal is "none" — and that is the whole rule.
+    """
+    required = allowed_confidence_values(refused=True)
+    problems = check_confidence_present(response, facts)
+    if str(response.get("confidence") or "").strip().lower() not in required:
+        problems.append(f"a refusal must report confidence {required[0]!r}")
+    return problems
 
 
-def check_staleness(result: ValidationResult, fields: dict[str, str], facts: Facts) -> None:
-    """B: an overdue stream must be acknowledged, and must not read as high confidence."""
+def check_overdue_acknowledged(
+    response: dict, facts: TimelineFacts, prediction: str
+) -> list[str]:
+    """B: an overdue stream must be acknowledged and capped below high."""
     if facts.days_overdue <= 0:
-        return
-    prediction = fields.get("predicted_next_move", "")
-    if not GAP_ACK.search(prediction):
-        result.note(
-            "B",
-            f"the stream is {facts.days_overdue} days overdue against a "
-            f"{facts.median_interval}-day median, but predicted_next_move does not "
-            "acknowledge the gap: "
-            f'"{_trim(prediction)}"',
+        return []
+    problems: list[str] = []
+    lowered = _norm(prediction).lower()
+    mentions_gap = bool(
+        re.search(
+            r"stale|quiet|quietly|silence|overdue|gone (?:quiet|silent)|not (?:produced|emitted)"
+            r"|has not|hasn't|since \w+ \d|since \d{4}-\d{2}-\d{2}|"
+            rf"\b{facts.days_overdue}\s*day|\b{facts.age_days}\s*day|"
+            r"\bno signals?\b|\bno further\b|\bnot produced\b",
+            lowered,
         )
-    confidence = (fields.get("confidence") or "").strip().lower()
+    )
+    if not mentions_gap:
+        problems.append(
+            f"stream is {facts.days_overdue}d overdue but predicted_next_move does not "
+            f"acknowledge the gap"
+        )
+    confidence = str(response.get("confidence") or "").strip().lower()
     if confidence == "high":
-        result.note(
-            "B",
-            f"confidence is 'high' on evidence {facts.days_overdue} days overdue; "
-            "an overdue stream caps confidence at medium",
+        problems.append(
+            f"stream is {facts.days_overdue}d overdue but confidence is 'high'"
         )
+    return problems
 
 
-def check_consistency(result: ValidationResult, fields: dict[str, str], facts: Facts) -> None:
-    """C: a prediction may not silently skip a stage of the model's own cycle."""
-    prediction = fields.get("predicted_next_move", "")
-    if is_refusal(prediction) or not prediction:
-        return
-    declared = _declared_cycle(fields.get("patterns", ""))
-    if not declared:
-        return
-    last_type = _last_signal_type(facts)
-    if last_type is None or last_type not in declared:
-        return
-    expected = declared[(declared.index(last_type) + 1) % len(declared)]
-    actual = _predicted_type(prediction)
-    if actual is None or actual == expected:
-        return
-    if re.search(r"why|because|despite|although|however|even so|skip|depart", prediction, re.I):
-        return  # it explained the departure
-    result.note(
-        "C",
-        f'predicted_next_move predicts a {actual} signal, but the patterns field '
-        f'declares the cycle {" -> ".join(declared)} and the last signal is '
-        f"{last_type}, so the next stage is {expected}; the forecast does not say "
-        f"why it departs: "{_trim(prediction)}"",
-    )
+def check_interval_claims(
+    response: dict, facts: TimelineFacts, *texts: str, evidence: str = ""
+) -> list[str]:
+    """E: a stated interval must be a real one, in either unit direction.
+
+    Rather than re-deriving the model's arithmetic, this asks the narrow
+    question the audit actually needed answered: is every day/week/month figure
+    it states one the FACTS block can support? The 30-45 day claim for a
+    21-36 day timeline fails because 45 is not within tolerance of any measured
+    interval, median, min or max.
+
+    Two deliberate tolerances, both because a false rejection costs a retry and
+    then a downgraded answer:
+
+    - The unit is honoured. "1 month" is a fair description of a 28-day rhythm
+      and is converted loosely; "30 days" is a precise claim and is held to the
+      exact figures. Checking both against one undifferentiated bag of integers
+      was how a fabricated 30-day cadence slipped through: one occurrence x 30
+      days/month happens to produce the number 30, so every "30 days" claim in
+      the corpus passed.
+    - A figure that the timeline evidence states as a duration is a citation,
+      not a cadence claim: "nine roles in 20 days" comes out of the signals, and
+      the model may restate it. The defect the audit found was a duration that
+      appears nowhere in the evidence. The test is on *stated durations*, not on
+      digits: an earlier version asked whether the digit string appeared anywhere
+      in the evidence, which "20" satisfied via every 2026 date and licensed a
+      fabricated 20-day cadence on all ten competitors. A price, a headcount, a
+      percentage and a year are not durations and do not license a cadence.
+    """
+    exact = facts.day_interval_claims()
+    cited = _stated_durations(evidence)
+    problems: list[str] = []
+    for text in texts:
+        normalised = _norm(text or "")
+        for match in _INTERVAL.finditer(normalised):
+            unit = match.group(3).lower()
+            # "a month" with no cadence cue nearby is a forecast horizon, not a
+            # claim about the stream. See _CADENCE_CUE.
+            if (match.group(1) or "").lower() in ("a", "an"):
+                around = normalised[max(0, match.start() - 60):match.end() + 20]
+                if not _CADENCE_CUE.search(around):
+                    continue
+            for value in (match.group(1), match.group(2)):
+                # "a 28 day cadence": the article is not a quantity, and reading
+                # it as one ("a" = 1 day) would reject the real figure next to
+                # it. The article only carries meaning on its own, as "a month".
+                if value is None:
+                    continue
+                if value.strip().lower() in ("a", "an") and match.group(2):
+                    continue
+                amount = _as_amount(value)
+                if amount is None:
+                    continue
+                if unit.startswith("day"):
+                    days, tolerance = {int(amount)}, 2
+                elif unit.startswith("week"):
+                    days, tolerance = {int(amount * 7)}, 2
+                elif unit.startswith("fortn"):
+                    days, tolerance = {int(amount * 14)}, 2
+                else:  # month: the unit is inherently approximate
+                    days, tolerance = {int(amount * 30), int(amount * 31)}, 4
+                if any(
+                    any(abs(candidate - real) <= tolerance for real in exact)
+                    for candidate in days
+                ):
+                    continue
+                if cited and cited.intersection(days):
+                    continue  # quoted from the evidence, not a cadence claim
+                problems.append(
+                    f"interval claim '{match.group(0).strip()}' does not correspond to "
+                    f"any measured interval (real intervals: {facts.intervals}, "
+                    f"median {facts.median_interval})"
+                )
+    return problems
 
 
-def _last_signal_type(facts: Facts) -> str | None:
-    for line in facts.last_three:
-        match = re.search(r"\((\w+)\)", line)
-        if match:
-            return match.group(1).lower()
-    return None
+def check_quotes_verbatim(
+    response: dict, facts: TimelineFacts, timeline_text: str
+) -> list[str]:
+    """D: a direct quote must appear word-for-word in the timeline.
 
-
-def _declared_cycle(patterns: str) -> list[str] | None:
-    """Recover a stage order the model states in 'patterns'."""
-    for length in (4, 3):
-        words: list[tuple[int, str]] = []
-        for canonical, pattern in STAGE_PATTERNS:
-            for m in re.finditer(pattern, patterns, re.I):
-                words.append((m.start(), canonical))
-        words.sort()
-        cycle: list[str] = []
-        for _, canonical in words:
-            if not cycle or cycle[-1] != canonical:
-                cycle.append(canonical)
-        if len(cycle) >= length:
-            return cycle[:length]
-    return None
-
-
-def _predicted_type(prediction: str) -> str | None:
-    for canonical, pattern in STAGE_PATTERNS:
-        if re.search(pattern, prediction, re.I):
-            return canonical
-    return None
-
-
-def check_calibration(
-    result: ValidationResult,
-    fields: dict[str, str],
-    facts: Facts,
-    signals: list[Signal],
-) -> None:
-    """D: the confidence fields must exist, and quotes must be verbatim."""
-    confidence = (fields.get("confidence") or "").strip().lower()
-    if confidence not in CONF_LEVELS:
-        result.note(
-            "D",
-            f'"confidence" is {confidence or "missing"!r}; it must be one of '
-            f"{list(CONF_LEVELS)}",
-        )
-    missing = (fields.get("missing_evidence") or "").strip()
-    if len(missing) < 12:
-        result.note(
-            "D",
-            '"missing_evidence" must be one sentence naming the additional signal '
-            f'that would raise confidence; got {missing!r}',
-        )
-    elif re.search(r"none\s+needed|n/?a$|nothing", missing, re.I):
-        result.note("D", f'"missing_evidence" is a non-answer: {missing!r}')
-
-    blob = " ".join(
-        f"{s.summary} {s.raw_notes or ''}" for s in signals
-    ).lower()
-    for field_name in ("patterns", "inferred_intent"):
-        value = fields.get(field_name, "") or ""
-        for match in QUOTE.finditer(value):
-            quote = match.group(1)
-            before = value[max(0, match.start() - 16): match.start()].lower()
-            if HYPOTHETICAL.search(before):
+    Coined labels are not quotations. "Build-then-Monetize" in single quotes is
+    the model naming its own construct, not claiming the competitor said it, so
+    a capitalised phrase with no matching timeline text is only rejected when it
+    also looks like prose — i.e. it contains a lowercase function word.
+    """
+    haystack = _norm(timeline_text).lower()
+    problems: list[str] = []
+    for field in _NARRATIVE_FIELDS:
+        body = _norm(str(response.get(field) or ""))
+        for match in _QUOTE.finditer(body):
+            quote = match.group(1).strip()
+            if not quote:
                 continue
-            if COINED.match(quote.strip()):
-                continue  # a label the model coined, not a quotation
-            probe = re.sub(r"\s+", " ", re.sub(r"[^\w\s-]", "", quote)).strip().lower()
-            if not probe or probe in blob:
+            probe = re.sub(r"\s+", " ", quote).strip().lower()
+            if probe in haystack:
                 continue
-            if _mostly_in(quote, blob):
+            # Not in the timeline. Is it plausibly a coined label rather than a
+            # claimed quotation? A prose quotation contains function words.
+            if not re.search(r"\b(the|a|an|and|of|to|for|with|is|are|from|by|in|on)\b",
+                             probe):
                 continue
-            result.note(
-                "D",
-                f'{field_name} quotes "{quote}", which does not appear verbatim in '
-                "any signal summary",
+            problems.append(
+                f"{field} quotes text that is not in the timeline: {quote[:70]!r}"
             )
+    return problems
 
 
-def _mostly_in(quote: str, blob: str, threshold: float = 0.7) -> bool:
-    """Tolerate light ellipsis inside a quote without waving real errors through."""
-    words = [w for w in re.findall(r"\w+", quote.lower()) if len(w) > 3]
-    if not words:
-        return False
-    hits = sum(1 for w in words if w in blob)
-    return hits / len(words) >= threshold
+def check_predicted_date_future(
+    response: dict, facts: TimelineFacts, prediction: str
+) -> list[str]:
+    """E: a forward-looking date must not already be past.
+
+    Two kinds of past date appear in a prediction and only one is a defect.
+    "After the 2026-04-15 pricing cut they rebuilt the tier" is citing evidence
+    and is fine. "The next expected signal is a messaging announcement on
+    2026-08-03" is a deadline the reader will act on, and it closed 56 days ago.
+    Rejecting both would burn a retry and downgrade a correct answer, so the
+    check requires three things together: the date is real, it is not a date
+    with a real signal behind it, and it reads as a target (a deadline cue
+    immediately before it) rather than as a narrative reference.
+    """
+    problems: list[str] = []
+    real = set(facts.signal_dates) | {facts.as_of}
+    for field in _NARRATIVE_FIELDS:
+        # Only the prediction can carry a deadline. The other three fields
+        # describe what happened, so a past date there is a citation.
+        is_prediction = field == "predicted_next_move"
+        body = _norm(prediction if is_prediction else str(response.get(field) or ""))
+        for match in _MONTH.finditer(body):
+            parsed = _as_date(match)
+            if parsed is None or parsed > facts.today:
+                continue  # a future prediction target is the point
+            iso = parsed.isoformat()
+            if iso in real:
+                continue  # citing a real signal
+            if not is_prediction or parsed == facts.today:
+                continue  # evidence fields may cite any past date
+            lead = body[max(0, match.start() - 40):match.start()].lower()
+            if not re.search(r"\b(by|before|on|due|expected|deadline|target|around)\s*$",
+                             lead):
+                continue  # narrative reference, not a deadline
+            problems.append(
+                f"predicted_next_move names {iso} as a future target, but it is before "
+                f"today ({facts.today.isoformat()}) and no real signal is dated then"
+            )
+    return problems
 
 
-def _trim(text: str, limit: int = 180) -> str:
-    text = " ".join((text or "").split())
-    return text if len(text) <= limit else text[: limit - 1] + "…"
+def validate_response(
+    response: dict,
+    facts: TimelineFacts,
+    timeline_text: str,
+    *,
+    refused: bool = False,
+) -> list[str]:
+    """Run every check. Returns a list of problems; empty means acceptable."""
+    problems: list[str] = []
+    prediction = str(response.get("predicted_next_move") or "")
+    patterns = str(response.get("patterns") or "")
+    intent = str(response.get("inferred_intent") or "")
 
+    if refused:
+        # A refusal is held to the calibration rules and nothing else: there is
+        # no forecast to check against the timeline.
+        problems.extend(check_refusal_calibrated(response, facts))
+        return problems
 
-def validate_read(
-    fields: dict[str, str],
-    facts: Facts,
-    signals: list[Signal],
-    today: date,
-) -> ValidationResult:
-    """Run every check. A refusal is exempt from A, B, C and E."""
-    result = ValidationResult(ok=True)
-    prediction = fields.get("predicted_next_move", "")
-    if is_refusal([fields.get("patterns", ""), fields.get("inferred_intent", ""), prediction]):
-        # A refusal still owes the reader a statement of what is missing.
-        check_calibration(result, fields, facts, signals)
-        return result
-
-    signal_dates = {s.date for s in signals}
-    narrative = " ".join(
-        fields.get(name, "") for name in ("patterns", "inferred_intent")
-    )
-    check_repetition(result, narrative, facts)
-    check_staleness(result, fields, facts)
-    check_consistency(result, fields, facts)
-    check_calibration(result, fields, facts, signals)
-    check_arithmetic(result, " ".join(fields.values()), facts, today, signal_dates)
-    return result
-
-
-RETRY_INSTRUCTIONS = """
-YOUR PREVIOUS RESPONSE WAS REJECTED BY VALIDATION. These are the exact defects:
-
-{defects}
-
-Return a corrected JSON object. Fix every item above. Do not argue the
-findings and do not restate your previous answer. Keep what was already
-correct, and recompute nothing: the FACTS block above is still the only
-source of numbers."""
-
-
-def retry_prompt(base_prompt: str, failures: list[str]) -> str:
-    return base_prompt + RETRY_INSTRUCTIONS.format(
-        defects="\n".join(f"- {f}" for f in failures)
-    )
+    problems.extend(check_confidence_present(response, facts))
+    problems.extend(check_overdue_acknowledged(response, facts, prediction))
+    problems.extend(check_interval_claims(response, facts, patterns, intent,
+                                         prediction, evidence=timeline_text))
+    problems.extend(check_quotes_verbatim(response, facts, timeline_text))
+    problems.extend(check_predicted_date_future(response, facts, prediction))
+    return problems

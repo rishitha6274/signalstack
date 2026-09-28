@@ -450,7 +450,13 @@ class Handler(BaseHTTPRequestHandler):
             }
         else:
             m = re.search(r"tracked signals for (.+?):", prompt)
-            dates = re.findall(r"\[(\d{4}-\d{2}-\d{2})\]", prompt)
+            # Count the NUMBERED timeline entries, not every bracketed date.
+            # The FACTS block repeats the last three signals in the same
+            # [date] (type) shape as the timeline, so counting brackets would
+            # count the timeline plus three — enough to push a 4-signal
+            # competitor over the refusal threshold and fake a rich read.
+            numbered = re.findall(r"^\d+\.\s+\[(\d{4}-\d{2}-\d{2})\]", prompt, re.M)
+            dates = numbered or re.findall(r"\[(\d{4}-\d{2}-\d{2})\]", prompt)
             n = len(dates)
             # Behave like a date-aware model: read the injected clock and the
             # freshness verdict out of the prompt, then forecast from today.
@@ -464,21 +470,58 @@ class Handler(BaseHTTPRequestHandler):
                 if today
                 else None
             )
+            # The FACTS block. A compliant fake reads its figures from here and
+            # quotes them back verbatim, exactly as the prompt demands. If the
+            # block is ever dropped from the prompt these come back as None and
+            # the contract checks in selfcheck fail loudly instead of the double
+            # quietly inventing plausible numbers.
+            facts_block = re.search(r"FACTS \(computed by the application.*?\n(?=\n|TIME)", prompt, re.S)
+            facts_text = facts_block.group(0) if facts_block else ""
+            median_m = re.search(r"median interval: (\d+) days", facts_text)
+            overdue_m = re.search(r"days overdue: (\d+)", facts_text)
+            intervals_m = re.search(r"in order: \[([^\]]*)\]", facts_text)
+            median = int(median_m.group(1)) if median_m else None
+            overdue = int(overdue_m.group(1)) if overdue_m else None
+            intervals = (
+                [int(x) for x in intervals_m.group(1).split(",") if x.strip()]
+                if intervals_m else []
+            )
+            repeat_m = re.search(r"transitions that DO repeat.*?: (.+)", facts_text)
+            repeats = repeat_m.group(1) if repeat_m else ""
+            single_m = re.search(r"seen only ONCE[^:]*: (.+)", facts_text)
+            singles = single_m.group(1) if single_m else ""
+
             if n < 6:
+                # A refusal: calibrated by construction, and exempt from the
+                # interval/quote checks because it asserts no pattern.
+                missing = (
+                    f"At least {6 - n} more signal(s) spanning a second occurrence of any "
+                    "signal-type transition would show whether an ordering exists at all."
+                )
                 payload = {
                     "patterns": (
                         f"Only {n} signals are on record, with no repeated cadence and no clear "
-                        "ordering between them. There is no funding, no hiring cluster and no "
-                        "pricing sequence to line up. The evidence is insufficient to identify a "
-                        "pattern."
+                        "ordering between them. Every signal-type transition in the FACTS block "
+                        "occurs once, so nothing here repeats. The evidence is insufficient to "
+                        "identify a pattern."
                     ),
                     "inferred_intent": (
                         f"With {n} unrelated signals on record I cannot distinguish a strategy from "
                         "routine product maintenance. Inferring intent here would be guessing."
                     ),
-                    "predicted_next_move": "Not predictable from the available evidence.",
-                    "recommendation": "Keep logging signals for this competitor before drawing conclusions.",
+                    "predicted_next_move": (
+                        "No reliable prediction can be made from the available evidence."
+                    ),
+                    "recommendation": (
+                        "Keep logging signals for this competitor before drawing conclusions."
+                    ),
+                    "confidence": "none",
+                    "missing_evidence": missing,
                 }
+                if median is None and intervals:
+                    raise AssertionError(
+                        "FACTS block did not expose the intervals to the model"
+                    )
             else:
                 forecast = (
                     f"On or before {horizon.isoformat()} they ship role-based access control, "
@@ -487,19 +530,45 @@ class Handler(BaseHTTPRequestHandler):
                     "They ship role-based access control and restore 'Contact sales' as the "
                     "primary CTA. "
                 )
-                stale_clause = (
-                    f"This rests on evidence that stopped at {dates[-1]} and has been quiet since, "
-                    "so the timing is a projection from a lapsed cadence rather than a live "
-                    "commitment; re-check their release notes and careers page before acting on "
-                    "the date. " if stale else ""
+                # A compliant forecasting read. Every number it states is copied
+                # from the FACTS block, every "repeats" claim is backed by a
+                # transition the block says occurs >= 2 times, and the overdue
+                # figure is surfaced in the prediction with confidence capped.
+                stale_clause = ""
+                confidence = "medium"
+                if overdue:
+                    stale_clause = (
+                        f"The stream has been quiet for {overdue} day(s) past its {median}-day "
+                        f"rhythm, and no signal has arrived since {dates[-1]}, so the expected "
+                        "move did not land on schedule and the timing below is a projection from a "
+                        "rhythm that has already broken. "
+                    )
+                    confidence = "low"
+                elif stale:
+                    stale_clause = (
+                        f"This rests on evidence that stopped at {dates[-1]} and has been quiet "
+                        "since, so re-check their release notes and careers page before acting on "
+                        "the date. "
+                    )
+                cadence_sentence = (
+                    f"The measured intervals are {intervals} days, a median of {median}."
+                    if intervals and median
+                    else "The FACTS block does not support a cadence claim."
+                )
+                repeat_sentence = (
+                    f"The only transition that repeats is {repeats}."
+                    if repeats else
+                    "No signal-type transition in the FACTS block occurs more than once, so this "
+                    "is one observed instance rather than a repeating cycle."
                 )
                 payload = {
                     "patterns": (
                         f"{n} signals between {dates[0]} and {dates[-1]} form an ordered chain: a "
                         f"Series C on {dates[0]}, a GTM hiring cluster immediately after, a 35% Pro "
                         f"price cut on {dates[5]}, then a homepage rewrite to 'enterprise-ready' "
-                        "messaging three weeks later, then SSO/SCIM at GA, then a second pricing "
-                        "move that restricted volume discounts to enterprise contracts."
+                        "messaging, then SSO/SCIM at GA, then a second pricing move that restricted "
+                        f"volume discounts to enterprise contracts. {cadence_sentence} "
+                        f"{repeat_sentence}"
                     ),
                     "inferred_intent": (
                         "Nimbus is converting funded go-to-market capacity into an enterprise "
@@ -516,6 +585,12 @@ class Handler(BaseHTTPRequestHandler):
                         "cadence has resumed, and in parallel ship SSO and audit logs in your own "
                         "product plus an enterprise-tier SKU, so a pre-emptive offer is ready "
                         "rather than late."
+                    ),
+                    "confidence": confidence,
+                    "missing_evidence": (
+                        f"A further {median}-day interval with no signal would confirm the stream "
+                        f"has gone quiet rather than merely irregular; any dated announcement after "
+                        f"{dates[-1]} would do the same."
                     ),
                 }
 

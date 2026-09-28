@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from typing import Any, Optional
 
 import requests
@@ -220,6 +221,56 @@ def _content_to_text(content: Any) -> str:
 # ---------------------------------------------------------------------------
 # Client
 # ---------------------------------------------------------------------------
+class RateLimitError(LLMError):
+    """A 429 whose wait the server told us, or a 429 worth honouring at all.
+
+    Kept distinct from LLMError because rate limiting is the one failure where
+    retrying *immediately* is guaranteed to fail again: the budget it spent is
+    per-minute, so the next attempt a millisecond later draws from the same
+    exhausted window.
+    """
+
+    def __init__(self, message: str, retry_after: Optional[float] = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+# A free Groq account is capped at roughly 1000 output tokens and 8000 tokens
+# per minute. A strategic read asks for a few hundred output tokens, so a single
+# read can consume a quarter of the budget and the next few calls collide. When
+# Groq tells us how long to wait we believe it; otherwise we assume something
+# close to the window rather than the sub-second pauses that used to burn every
+# retry inside one second and then surface a fallback stub.
+RATE_LIMIT_DEFAULT_WAIT = 20.0
+RATE_LIMIT_MAX_WAIT = 75.0
+
+
+def _retry_after_seconds(response: Any) -> Optional[float]:
+    """Pull the server's own wait hint out of a 429, if it sent one."""
+    headers = getattr(response, "headers", None) or {}
+    # Retry-After is either delta-seconds or an HTTP-date. Only the numeric
+    # form is worth parsing; a date would need a clock we should not trust
+    # against the server's.
+    raw = headers.get("retry-after") or headers.get("Retry-After")
+    if raw:
+        try:
+            return max(0.0, float(str(raw).strip()))
+        except (TypeError, ValueError):
+            pass
+    # Groq's JSON error message embeds it: "Please try again in 34.98s."
+    try:
+        body = response.text or ""
+    except Exception:  # noqa: BLE001 - a body we cannot read is not fatal
+        return None
+    match = re.search(r"try again in\s*([0-9]+(?:\.[0-9]+)?)\s*s", body, re.I)
+    if match:
+        try:
+            return max(0.0, float(match.group(1)))
+        except ValueError:
+            return None
+    return None
+
+
 class GroqClient:
     def __init__(
         self,
@@ -357,13 +408,31 @@ class GroqClient:
                         use_json_mode = False
                         log.warning("%s rejected json mode, retrying without it", model_name)
                     if attempt < LLM_MAX_RETRIES:
-                        log.warning(
-                            "Groq call failed on %s (attempt %d/%d): %s",
-                            model_name,
-                            attempt + 1,
-                            LLM_MAX_RETRIES + 1,
-                            exc,
-                        )
+                        if isinstance(exc, RateLimitError):
+                            # Honour the server's own wait. Without this the
+                            # three attempts fire inside a single second, each
+                            # drawing on the same exhausted per-minute window,
+                            # and a transient 429 becomes a fallback stub that
+                            # looks like a model that simply declined.
+                            wait = exc.retry_after or RATE_LIMIT_DEFAULT_WAIT
+                            wait = min(wait, RATE_LIMIT_MAX_WAIT)
+                            log.warning(
+                                "Groq rate limit on %s (attempt %d/%d): waiting %.1fs "
+                                "for the per-minute window to reset",
+                                model_name,
+                                attempt + 1,
+                                LLM_MAX_RETRIES + 1,
+                                wait,
+                            )
+                            time.sleep(wait)
+                        else:
+                            log.warning(
+                                "Groq call failed on %s (attempt %d/%d): %s",
+                                model_name,
+                                attempt + 1,
+                                LLM_MAX_RETRIES + 1,
+                                exc,
+                            )
                     continue
             log.warning("exhausting retries on %s, moving to next model", model_name)
 
@@ -399,6 +468,12 @@ class GroqClient:
             )
         except requests.RequestException as exc:
             raise LLMError(f"network error calling {model}: {exc}") from exc
+
+        if response.status_code == 429:
+            wait = _retry_after_seconds(response)
+            raise RateLimitError(
+                f"{model} -> 429: {response.text[:300]}", retry_after=wait
+            )
 
         if response.status_code >= 400:
             raise LLMError(f"{model} -> {response.status_code}: {response.text[:300]}")

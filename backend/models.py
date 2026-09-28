@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 from datetime import date, datetime
+from enum import Enum
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -181,24 +182,44 @@ class SynthesisRequest(BaseModel):
     competitor: str
 
 
+class Confidence(str, Enum):
+    """How much weight the read's own conclusion can bear.
+
+    "none" is reserved for a refusal. It is not a synonym for "low": a refusal
+    asserts nothing, whereas a low-confidence read asserts something weakly, and
+    the UI renders them differently because the difference is the point of the
+    exercise — an honest "not enough signal" has more value than a confident
+    guess, and more value than a timid guess.
+    """
+
+    high = "high"
+    medium = "medium"
+    low = "low"
+    none = "none"
+
+
 class SynthesisResponse(BaseModel):
     competitor: str
     patterns: str
     inferred_intent: str
     predicted_next_move: str
     recommendation: str
-    # Calibration. A read that names a pattern but never says how much to trust
-    # it reads identically whether it rests on twelve signals or three, so the
-    # model has to commit to a level in words, and name the evidence that would
-    # move it. "none" is reserved for a refusal: there is no forecast to
-    # calibrate, and labelling one "low" would imply a weak prediction exists.
-    confidence: str = "none"  # high | medium | low | none
+    # Calibration. The audit found every one of the ten reads stating a dated
+    # forecast with no indication of how much to trust it, and none naming the
+    # observation that would settle the question. These two fields close that
+    # gap, and are enforced by backend.validators rather than trusted to the
+    # prompt.
+    confidence: Confidence = Confidence.none
     missing_evidence: str = ""
+    # True when the model was asked twice, failed the validators both times, and
+    # the narrative was withheld in favour of the deterministic read. The
+    # response is still a 200 and still carries the measured facts — this flag
+    # is how the UI and the audit tell that apart from a read the model wrote
+    # and passed, or a refusal it wrote on purpose.
+    narrative_withheld: bool = False
     # Provenance: what the read was built from, so the UI can be honest about it.
     signal_count: int = 0
-    timeline_window: str = ""  # "2026-01-14 to 2026-08-11" — no signal count
-    signal_count_validated: bool = True  # False when a read failed validation
-    validation_notes: list[str] = []
+    timeline_window: str = ""
     model_used: str = ""
     # Evidence freshness. A read built from a timeline whose last signal predates
     # today is still a valid read, but the reader has to be told how far behind
@@ -206,6 +227,10 @@ class SynthesisResponse(BaseModel):
     data_as_of: str = ""  # date of the most recent signal, ISO
     evidence_age_days: Optional[int] = None  # whole days between that and today
     evidence_staleness: str = ""  # fresh | aging | stale | unknown
+    # How far past its own rhythm the last signal sits. Distinct from
+    # evidence_age_days: 40 days is unremarkable for a quarterly competitor and
+    # overdue for a weekly one.
+    days_overdue: int = 0
 
 
 # --------------------------------------------------------------------------
