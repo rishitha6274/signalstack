@@ -1,6 +1,6 @@
 {
   "dataset": "signal-stack-seed-v1",
-  "note": "Synthetic competitor intelligence. Fictional companies, fabricated events. The Nimbus AI series contains a deliberately correlated funding -> hiring -> pricing -> messaging chain spanning six months; the distractor signal (2026-03-11) is included so a synthesis has to discriminate rather than pattern-match everything. Vertex Cloud and Pathfinder Labs are intentionally thin and uncorrelated, to show the agent refuses to invent a strategy from sparse data.",
+  "note": "Synthetic competitor intelligence. Fictional companies, fabricated events. Nimbus AI is the demo case: a deliberately correlated funding -> hiring -> pricing -> messaging -> feature chain spanning six months, with one distractor signal (2026-03-11) so a synthesis has to discriminate rather than pattern-match everything. Seven further competitors were added to make the corpus realistic and to exercise the retrieval and time-anchoring paths across a spread of cadences: Palisade Security (incident response -> compliance -> federal), Corvus Data (open core -> commercial cloud), Halcyon Mobility (utility pricing -> platform -> fleet), Lumen Health (regulated-market compliance chain), Brightline Retail (a clear cadence that then stops), Ferrous Systems (hardware pivoting to software). Vertex Cloud, Pathfinder Labs and Tidewater Analytics are intentionally thin and uncorrelated, to show the agent refuses to invent a strategy from sparse data. End dates are deliberately uneven: some timelines are current, some have gone quiet, so evidence staleness is visible in the product rather than assumed.",
   "competitors": [
     {
       "name": "Nimbus AI",
@@ -105,6 +105,434 @@
       ]
     },
     {
+      "name": "Palisade Security",
+      "profile": "Security platform. A reactive arc: a credential-stuffing incident forces a product and compliance rebuild, which then opens the federal market. Still actively shipping.",
+      "signals": [
+        {
+          "competitor": "Palisade Security",
+          "date": "2026-01-09",
+          "signal_type": "feature",
+          "summary": "Palisade Security ships an emergency patch for an authentication-bypass vulnerability in its agent, rated critical.",
+          "raw_notes": "Advisory PAL-2026-01: authentication bypass in the endpoint agent, CVSS 9.1. Patch released within 48 hours of disclosure. No customer data exposure reported. Security team asks all customers to confirm agent version 4.2.1 or later.",
+          "source": "security advisory"
+        },
+        {
+          "competitor": "Palisade Security",
+          "date": "2026-01-23",
+          "signal_type": "messaging",
+          "summary": "Palisade Security publishes a public post-incident review and appoints a VP of Incident Response.",
+          "raw_notes": "First-ever public post-incident review published, apologising for the disclosure delay. Announces a new VP of Incident Response hired from a competitor. Marketing still leads with 'zero trust, simplified' and no reference to the incident on the homepage.",
+          "source": "blog + press"
+        },
+        {
+          "competitor": "Palisade Security",
+          "date": "2026-02-27",
+          "signal_type": "funding",
+          "summary": "Palisade Security raised a $140M Series D, with a portion earmarked for compliance engineering and a federal certifications programme.",
+          "raw_notes": "$140M Series D at a $3.1B valuation led by Foundry Ridge. CEO states proceeds will fund 'a new compliance and assurance organization' plus FedRAMP authorization work. Also commits to hiring 200 people over the year.",
+          "source": "press release"
+        },
+        {
+          "competitor": "Palisade Security",
+          "date": "2026-03-20",
+          "signal_type": "hiring",
+          "summary": "Eight incident-response and threat-intelligence roles posted in one week, the company's largest single hiring push.",
+          "raw_notes": "Eight openings in seven days: three Detection Engineers, two Incident Response Lead roles, a Head of Threat Intelligence, two SOC analysts. Careers page cites 'building the detection layer we should have had' in the engineering blog.",
+          "source": "job board scrape"
+        },
+        {
+          "competitor": "Palisade Security",
+          "date": "2026-04-17",
+          "signal_type": "feature",
+          "summary": "Palisade Security launched a fully managed detection and response offering, productising the capability the new hires were building.",
+          "raw_notes": "New MDR tier launched: 24/7 monitoring and response run by Palisade staff, priced as a subscription per protected endpoint. First product to be explicitly positioned as a response to the January incident.",
+          "source": "product launch"
+        },
+        {
+          "competitor": "Palisade Security",
+          "date": "2026-05-22",
+          "signal_type": "pricing",
+          "summary": "Palisade Security began bundling continuously-generated SOC 2 evidence into the platform at no extra cost, removing a separately-priced audit-prep module.",
+          "raw_notes": "Pricing update: automated SOC 2 and ISO 27001 evidence collection folded into all paid tiers. The standalone compliance-prep module, previously $4,000/year, is retired. FAQ now stresses 'audit-ready by default'.",
+          "source": "pricing page snapshot"
+        },
+        {
+          "competitor": "Palisade Security",
+          "date": "2026-06-19",
+          "signal_type": "messaging",
+          "summary": "Palisade Security shifted its homepage from 'zero trust, simplified' to 'from tools to outcomes'.",
+          "raw_notes": "Homepage rewrite. New headline 'From tools to outcomes'. Subhead now sells reduced breach likelihood and a 15-minute mean-time-to-respond guarantee. Endpoint and compliance features move to secondary pages. Paid creative retargets CISOs rather than security engineers.",
+          "source": "homepage snapshot"
+        },
+        {
+          "competitor": "Palisade Security",
+          "date": "2026-07-24",
+          "signal_type": "feature",
+          "summary": "Palisade Security achieved FedRAMP Moderate authorization, opening it to US federal agencies.",
+          "raw_notes": "FedRAMP Moderate authorization announced, with a 3PAO assessment completed in five months. Press release emphasises the 'fastest authorization in our company history'. Government solutions page published the same day.",
+          "source": "press release"
+        },
+        {
+          "competitor": "Palisade Security",
+          "date": "2026-08-14",
+          "signal_type": "hiring",
+          "summary": "Palisade Security opened a federal account team including a Director of Public Sector Sales and two public-sector security engineers.",
+          "raw_notes": "New cluster: Director of Public Sector Sales, two Public Sector Security Engineers, a GovCloud compliance manager. All four reference 'our recent FedRAMP authorization' as the reason the roles exist.",
+          "source": "job board scrape"
+        },
+        {
+          "competitor": "Palisade Security",
+          "date": "2026-09-05",
+          "signal_type": "pricing",
+          "summary": "Palisade Security launched a dedicated federal tier and listed itself on the GSA schedule.",
+          "raw_notes": "New Federal tier: custom pricing, FedRAMP Moderate included, 90-day minimum term. Company also added to the GSA MAS schedule. Pricing page gains a 'Government' tab alongside Commercial.",
+          "source": "pricing page snapshot"
+        },
+        {
+          "competitor": "Palisade Security",
+          "date": "2026-09-25",
+          "signal_type": "feature",
+          "summary": "Palisade Security opened a sovereign cloud region in Frankfurt, citing data-residency requirements as the driver.",
+          "raw_notes": "EU region live in Frankfurt with EU-only key custody, positioned explicitly at customers with data-residency mandates in Germany and France. Changelog notes demand from 'regulated European financial services' accounts.",
+          "source": "changelog"
+        }
+      ]
+    },
+    {
+      "name": "Corvus Data",
+      "profile": "Data infrastructure. The open-core trap: strong engineering cadence, then a late commercial layer bolted on. Actively shipping.",
+      "signals": [
+        {
+          "competitor": "Corvus Data",
+          "date": "2026-02-19",
+          "signal_type": "feature",
+          "summary": "Corvus Data released version 2.0 of its open-source query engine with a new storage format.",
+          "raw_notes": "Release 2.0: new columnar storage format, 3x faster scans on the standard benchmark. Blog post is technical only, no pricing or commercial mention. Community edition remains the primary download.",
+          "source": "changelog"
+        },
+        {
+          "competitor": "Corvus Data",
+          "date": "2026-03-26",
+          "signal_type": "messaging",
+          "summary": "Corvus Data publicly reaffirmed its open-core licence commitment during a licensing dispute with a cloud provider.",
+          "raw_notes": "Company blog commits to the community edition remaining free and Apache-licensed indefinitely, following a dispute with a hyperscaler. CEO interview repeats the commitment. No hosted product mentioned.",
+          "source": "blog + press"
+        },
+        {
+          "competitor": "Corvus Data",
+          "date": "2026-05-07",
+          "signal_type": "pricing",
+          "summary": "Corvus Data launched a managed cloud service, the company's first paid product, at $0.02 per scanned gigabyte.",
+          "raw_notes": "Corvus Cloud generally available. Pricing $0.02/GB scanned plus storage, with a $200 monthly minimum. Self-hosting the community edition remains free and is still the default linked from the homepage hero.",
+          "source": "pricing page snapshot"
+        },
+        {
+          "competitor": "Corvus Data",
+          "date": "2026-06-11",
+          "signal_type": "hiring",
+          "summary": "Corvus Data posted six platform engineering roles, its largest hiring increase since founding.",
+          "raw_notes": "Six openings: three platform engineers for the managed service, an SRE, a billing engineer, and a technical account manager. First non-research engineering roles the company has advertised.",
+          "source": "job board scrape"
+        },
+        {
+          "competitor": "Corvus Data",
+          "date": "2026-07-16",
+          "signal_type": "feature",
+          "summary": "Corvus Data added real-time streaming ingest to the managed cloud service, unavailable in the community edition.",
+          "raw_notes": "Changelog: continuous streaming ingest, billed per GB. Blog notes it is 'a managed-only capability while we stabilise the protocol'. Community edition feature matrix updated to mark it proprietary.",
+          "source": "changelog"
+        },
+        {
+          "competitor": "Corvus Data",
+          "date": "2026-08-20",
+          "signal_type": "messaging",
+          "summary": "Corvus Data added a compliance section to its site, leading with SOC 2 Type II and ISO 27001 for the cloud service.",
+          "raw_notes": "New compliance page covering SOC 2 Type II and ISO 27001, both scoped to Corvus Cloud rather than the open-source engine. Copy explicitly distinguishes the two: 'our cloud service is audited; the community edition is source-available'.",
+          "source": "homepage snapshot"
+        },
+        {
+          "competitor": "Corvus Data",
+          "date": "2026-09-08",
+          "signal_type": "pricing",
+          "summary": "Corvus Data moved to consumption-only pricing, retiring the monthly minimum and adding a committed-use tier.",
+          "raw_notes": "Pricing update: $200 monthly minimum removed, pure consumption billing. New committed-use discount of 35% for annual prepay. FAQ added explaining how cloud spend differs from self-hosted infrastructure cost.",
+          "source": "pricing page snapshot"
+        },
+        {
+          "competitor": "Corvus Data",
+          "date": "2026-09-24",
+          "signal_type": "feature",
+          "summary": "Corvus Data shipped a column-level lineage UI for the managed service.",
+          "raw_notes": "Release: visual lineage from source to dashboard, cloud-only. Changelog references customer requests from enterprise accounts. No changes to the community edition in this release.",
+          "source": "changelog"
+        }
+      ]
+    },
+    {
+      "name": "Halcyon Mobility",
+      "profile": "EV charging network. Utility pricing reform opens a platform business. Actively shipping.",
+      "signals": [
+        {
+          "competitor": "Halcyon Mobility",
+          "date": "2026-01-08",
+          "signal_type": "feature",
+          "summary": "Halcyon Mobility added OCPP 2.0 support across its charger network.",
+          "raw_notes": "Firmware rollout adding OCPP 2.0 smart-charging protocol to existing units. Described as infrastructure readiness with no customer-facing announcement or pricing change.",
+          "source": "changelog"
+        },
+        {
+          "competitor": "Halcyon Mobility",
+          "date": "2026-02-17",
+          "signal_type": "pricing",
+          "summary": "Halcyon Mobility replaced per-kWh charging fees with a monthly subscription.",
+          "raw_notes": "Pricing change: per-kWh fees removed entirely, replaced by a $14/month subscription per port. Company frames it as 'predictable costs for drivers'. No enterprise offering mentioned.",
+          "source": "pricing page snapshot"
+        },
+        {
+          "competitor": "Halcyon Mobility",
+          "date": "2026-03-31",
+          "signal_type": "funding",
+          "summary": "Halcyon Mobility closed a $95M Series C to fund grid-integration software and fleet partnerships.",
+          "raw_notes": "$95M Series C led by Northgate Energy Partners. Proceeds earmarked for 'grid software' and 'commercial fleet relationships'. Site footprint expansion in the Midwest mentioned as the hardware use of funds.",
+          "source": "press release"
+        },
+        {
+          "competitor": "Halcyon Mobility",
+          "date": "2026-05-06",
+          "signal_type": "feature",
+          "summary": "Halcyon Mobility launched a fleet dashboard for commercial customers, three months before any enterprise pricing.",
+          "raw_notes": "New product: multi-site fleet dashboard with per-vehicle charge scheduling, billed as an add-on at $9/vehicle/month. First product gated behind a business account signup rather than the consumer portal.",
+          "source": "product launch"
+        },
+        {
+          "competitor": "Halcyon Mobility",
+          "date": "2026-06-12",
+          "signal_type": "messaging",
+          "summary": "Halcyon Mobility introduced 'grid-aware charging' as its lead message across the site and paid media.",
+          "raw_notes": "Messaging shift: homepage hero changes from 'fast, clean charging' to 'grid-aware charging that lowers your utility bill'. New creative targets facility and energy managers rather than individual EV owners.",
+          "source": "homepage snapshot"
+        },
+        {
+          "competitor": "Halcyon Mobility",
+          "date": "2026-07-21",
+          "signal_type": "hiring",
+          "summary": "Halcyon Mobility opened five field operations roles alongside its first two software engineering roles.",
+          "raw_notes": "Seven openings: five field ops technicians for Midwest expansion, plus the company's first two software engineers, both with utility-demand-response experience on file.",
+          "source": "job board scrape"
+        },
+        {
+          "competitor": "Halcyon Mobility",
+          "date": "2026-08-28",
+          "signal_type": "feature",
+          "summary": "Halcyon Mobility shipped a demand-charge optimizer that schedules charging around utility tariff windows.",
+          "raw_notes": "New feature: automated scheduling against time-of-use and demand-charge tariff structures, advertised as reducing peak-period draw. Company claims pilots cut facility energy costs 18%.",
+          "source": "changelog"
+        },
+        {
+          "competitor": "Halcyon Mobility",
+          "date": "2026-09-22",
+          "signal_type": "pricing",
+          "summary": "Halcyon Mobility launched a commercial fleet tier with per-port pricing and utility-bill guarantees.",
+          "raw_notes": "New Commercial Fleet tier: per-port pricing, guaranteed demand-charge savings, minimum 20 ports. Replaces the earlier $9/vehicle add-on. Contact-sales CTA added to the pricing page for the first time.",
+          "source": "pricing page snapshot"
+        }
+      ]
+    },
+    {
+      "name": "Lumen Health",
+      "profile": "Clinical AI. A regulated-market buildout where compliance engineering gates the sales motion. Cadence has recently slowed.",
+      "signals": [
+        {
+          "competitor": "Lumen Health",
+          "date": "2026-01-14",
+          "signal_type": "messaging",
+          "summary": "Lumen Health launched its 'care team first' positioning for clinical documentation AI.",
+          "raw_notes": "Brand refresh positioning Lumen Health around clinicians rather than revenue-cycle buyers. New tagline 'Built for the care team, not the billing office'. No product or pricing change announced with the repositioning.",
+          "source": "homepage snapshot"
+        },
+        {
+          "competitor": "Lumen Health",
+          "date": "2026-02-09",
+          "signal_type": "feature",
+          "summary": "Lumen Health opened a beta of ambient clinical documentation, its first product aimed at clinicians directly.",
+          "raw_notes": "Ambient documentation beta for outpatient clinics, generating visit notes from consultation audio. Waitlist-only, no pricing published. Company notes beta is limited to clinics with a signed BAA.",
+          "source": "blog"
+        },
+        {
+          "competitor": "Lumen Health",
+          "date": "2026-03-17",
+          "signal_type": "funding",
+          "summary": "Lumen Health raised an $85M Series B, explicitly funding HIPAA compliance engineering and a hospital sales team.",
+          "raw_notes": "$85M Series B led by Covenant Health Ventures. CFO states proceeds fund 'a dedicated security and compliance organization' and 'a hospital business development team'. Neither function existed a year earlier.",
+          "source": "press release"
+        },
+        {
+          "competitor": "Lumen Health",
+          "date": "2026-04-08",
+          "signal_type": "hiring",
+          "summary": "Lumen Health posted five compliance, security and hospital business-development roles simultaneously.",
+          "raw_notes": "Five openings: HIPAA Compliance Officer, Security Engineer, Hospital BD Lead, Clinical Data Engineer, Solutions Architect for health systems. Every posting references the Series B and 'hospital procurement cycles'.",
+          "source": "job board scrape"
+        },
+        {
+          "competitor": "Lumen Health",
+          "date": "2026-04-29",
+          "signal_type": "feature",
+          "summary": "Lumen Health shipped audit logging and BAA management tooling, closing the gap raised by the new compliance hires.",
+          "raw_notes": "Release: immutable audit trail and self-service BAA lifecycle management. Changelog credits 'the compliance team we built this year'. Marketed as procurement-readiness, not clinician-facing.",
+          "source": "changelog"
+        },
+        {
+          "competitor": "Lumen Health",
+          "date": "2026-05-27",
+          "signal_type": "messaging",
+          "summary": "Lumen Health rebranded to 'Built for hospital IT', a month after shipping procurement tooling.",
+          "raw_notes": "Messaging shift: primary audience moves from clinicians to hospital IT departments. New case study with a six-hospital system. Paid media moves from clinician forums to CIO and health-IT publications.",
+          "source": "homepage snapshot"
+        },
+        {
+          "competitor": "Lumen Health",
+          "date": "2026-06-23",
+          "signal_type": "pricing",
+          "summary": "Lumen Health replaced per-clinician pricing with per-bed pricing, aligning billing with how health systems buy.",
+          "raw_notes": "Pricing model change: per-clinician replaced by per-bed-per-month, described as matching health-system budgeting. Existing per-clinician contracts grandfathered. Self-serve checkout still available below 5 beds.",
+          "source": "pricing page snapshot"
+        },
+        {
+          "competitor": "Lumen Health",
+          "date": "2026-07-14",
+          "signal_type": "hiring",
+          "summary": "Lumen Health opened implementation and EHR integration engineering roles, shifting hiring from sales to deployment.",
+          "raw_notes": "Four openings: two Implementation Engineers, an Epic integration specialist, and a Field Engineering Lead. Signals a move from selling to deploying, with descriptions focused on onboarding timelines rather than pipeline.",
+          "source": "job board scrape"
+        },
+        {
+          "competitor": "Lumen Health",
+          "date": "2026-08-11",
+          "signal_type": "feature",
+          "summary": "Lumen Health brought HL7 and FHIR bulk synchronization to general availability for health-system customers.",
+          "raw_notes": "Release: bulk FHIR and HL7 sync for enterprise health systems, requiring a signed BAA and a minimum bed count. Changelog frames it as closing the top request from the 2025 health-system pilots.",
+          "source": "changelog"
+        }
+      ]
+    },
+    {
+      "name": "Ferrous Systems",
+      "profile": "Industrial robotics. A hardware company shifting its centre of gravity to a software and services layer.",
+      "signals": [
+        {
+          "competitor": "Ferrous Systems",
+          "date": "2026-02-05",
+          "signal_type": "feature",
+          "summary": "Ferrous Systems shipped improved gripper control firmware for its existing hardware line.",
+          "raw_notes": "Firmware release 7.2 improving pick accuracy on mixed SKU lines. Distributed to installed base at no charge. No pricing or packaging change; hardware roadmap unchanged.",
+          "source": "changelog"
+        },
+        {
+          "competitor": "Ferrous Systems",
+          "date": "2026-04-16",
+          "signal_type": "messaging",
+          "summary": "Ferrous Systems reframed its value proposition around handling failure cases rather than pick speed.",
+          "raw_notes": "Messaging change: new site leads with 'picks up where vision fails' rather than throughput numbers. Target customer shifts to integrators rather than end-of-line operations teams. Hardware specs still front and centre.",
+          "source": "homepage snapshot"
+        },
+        {
+          "competitor": "Ferrous Systems",
+          "date": "2026-05-28",
+          "signal_type": "pricing",
+          "summary": "Ferrous Systems introduced robot-as-a-service monthly pricing alongside unit sales.",
+          "raw_notes": "New RaaS offering: monthly subscription covering hardware, maintenance and software, with a buyout option after 36 months. Described as removing capex barriers for mid-size manufacturers. First time the company has offered anything other than hardware sales.",
+          "source": "pricing page snapshot"
+        },
+        {
+          "competitor": "Ferrous Systems",
+          "date": "2026-07-09",
+          "signal_type": "feature",
+          "summary": "Ferrous Systems launched a fleet management dashboard covering every unit under an RaaS contract.",
+          "raw_notes": "New dashboard: cross-site robot health, uptime and cycle-time analytics. Available only to RaaS subscribers, deliberately excluded from hardware-only customers. Blog frames it as 'the software layer we have been missing'.",
+          "source": "product launch"
+        },
+        {
+          "competitor": "Ferrous Systems",
+          "date": "2026-08-20",
+          "signal_type": "hiring",
+          "summary": "Ferrous Systems posted four controls and software engineering roles, its first non-hardware engineering hires.",
+          "raw_notes": "Four openings: two controls engineers, a fleet-software engineer, and a integrations lead. Company headcount is still ~180 with hardware manufacturing the majority. Roles cite the RaaS launch and the dashboard as the reason for the shift.",
+          "source": "job board scrape"
+        },
+        {
+          "competitor": "Ferrous Systems",
+          "date": "2026-09-16",
+          "signal_type": "messaging",
+          "summary": "Ferrous Systems announced a software-first roadmap at an industry expo, including a deprecation of its standalone hardware configurator.",
+          "raw_notes": "Keynote at Automate 2026 announces a 'software-first roadmap'. The standalone hardware configurator will be retired in favour of configuring units through the fleet dashboard. Manufacturing expansion in Ohio announced alongside, and hardware remains the revenue base today.",
+          "source": "press + keynote"
+        }
+      ]
+    },
+    {
+      "name": "Brightline Retail",
+      "profile": "Retail analytics. The stale-evidence case: a metronomic 28-day cadence running feature -> messaging -> pricing for two full cycles, which then simply stops. The interesting part is what the gap cannot tell you -- a cadence that breaks and a cadence that continues while someone stopped watching look identical from the stored timeline, and the read has to say so rather than project the old rhythm.",
+      "signals": [
+        {
+          "competitor": "Brightline Retail",
+          "date": "2026-01-19",
+          "signal_type": "feature",
+          "summary": "Brightline Retail launched a store-level analytics dashboard for multi-site retail chains.",
+          "raw_notes": "New dashboard aggregating POS data by store, with configurable thresholds. Announced to existing customers by email and to a trade newsletter, without a press release. No pricing change.",
+          "source": "changelog"
+        },
+        {
+          "competitor": "Brightline Retail",
+          "date": "2026-02-16",
+          "signal_type": "messaging",
+          "summary": "Brightline Retail shifted its messaging from shelf analytics to in-store execution.",
+          "raw_notes": "Messaging change: 'shelf to checkout' replaces 'category analytics' in all creative. Site navigation reorganised around store operations rather than merchandising teams. First of a repeating 28-day cycle of feature, messaging and pricing moves.",
+          "source": "homepage snapshot"
+        },
+        {
+          "competitor": "Brightline Retail",
+          "date": "2026-03-16",
+          "signal_type": "pricing",
+          "summary": "Brightline Retail replaced per-seat pricing with per-store pricing.",
+          "raw_notes": "Pricing model change: $120/seat/month replaced by $400/store/month. Rationale given as removing incentives to share logins. Small retailers lose the volume discount they had below five seats.",
+          "source": "pricing page snapshot"
+        },
+        {
+          "competitor": "Brightline Retail",
+          "date": "2026-04-13",
+          "signal_type": "feature",
+          "summary": "Brightline Retail added automated demand forecasting at store level.",
+          "raw_notes": "Release: demand forecasting per store-SKU, positioned as reducing stockouts. Blog post reports 14% stockout reduction across a pilot group of 30 stores.",
+          "source": "blog"
+        },
+        {
+          "competitor": "Brightline Retail",
+          "date": "2026-05-11",
+          "signal_type": "messaging",
+          "summary": "Brightline Retail rebranded from a reporting tool to a decision tool.",
+          "raw_notes": "Messaging change: homepage hero becomes 'from dashboards to decisions', matching the AI positioning its forecasting feature implied. Paid creative moves from analytics managers to operations directors. No product or pricing change alongside.",
+          "source": "homepage snapshot"
+        },
+        {
+          "competitor": "Brightline Retail",
+          "date": "2026-06-08",
+          "signal_type": "pricing",
+          "summary": "Brightline Retail introduced a $4,800 annual minimum on commercial contracts.",
+          "raw_notes": "Pricing update: annual minimum spend of $4,800 for chains above 20 stores, equivalent to the 12-store tier under the old per-seat model. Self-serve below 20 stores unchanged. Completes two full 28-day cycles of the same three-move rhythm.",
+          "source": "pricing page snapshot"
+        },
+        {
+          "competitor": "Brightline Retail",
+          "date": "2026-07-06",
+          "signal_type": "feature",
+          "summary": "Brightline Retail added automated replenishment ordering for chains above 100 stores.",
+          "raw_notes": "Release: auto-replenishment that places orders with suppliers, gated behind a 100-store minimum. Changelog notes it is the first feature restricted by chain size rather than seat count. Last public signal on record.",
+          "source": "changelog"
+        }
+      ]
+    },
+    {
       "name": "Vertex Cloud",
       "profile": "Enterprise hosting incumbent. Thin, flat signal set - the control case for 'does not hallucinate patterns'.",
       "signals": [
@@ -169,6 +597,36 @@
           "summary": "Pathfinder Labs sponsored a developer conference and published a recap post.",
           "raw_notes": "Company blog: recap of sponsoring a regional developer conference, plus a talk by a cofounder. No product, pricing, or hiring announcements in the post.",
           "source": "blog"
+        }
+      ]
+    },
+    {
+      "name": "Tidewater Analytics",
+      "profile": "Business-intelligence vendor. Third thin control case, and the only one whose signals span the widest dates in the corpus -- three points on a line is still three points.",
+      "signals": [
+        {
+          "competitor": "Tidewater Analytics",
+          "date": "2026-02-04",
+          "signal_type": "feature",
+          "summary": "Tidewater Analytics added a scheduled email report builder.",
+          "raw_notes": "Release: recurring emailed dashboards and CSV exports. Described as a long-requested convenience feature for existing customers. No change to packaging or the free tier.",
+          "source": "changelog"
+        },
+        {
+          "competitor": "Tidewater Analytics",
+          "date": "2026-05-13",
+          "signal_type": "messaging",
+          "summary": "Tidewater Analytics published a founder blog post on the death of the dashboard.",
+          "raw_notes": "Opinion piece from the founder arguing dashboards are obsolete. No accompanying product announcement, pricing change, or hiring activity. Site copy and product positioning otherwise untouched.",
+          "source": "blog"
+        },
+        {
+          "competitor": "Tidewater Analytics",
+          "date": "2026-08-06",
+          "signal_type": "pricing",
+          "summary": "Tidewater Analytics raised its free-tier row limit from 5,000 to 10,000.",
+          "raw_notes": "Pricing update: free tier raised to 10,000 rows per month. Framed as an acquisition play for small teams. No paid-tier changes, no sales motion, and no self-serve downgrade path offered.",
+          "source": "pricing page snapshot"
         }
       ]
     }

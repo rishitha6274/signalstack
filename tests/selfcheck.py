@@ -186,7 +186,23 @@ def main() -> int:
 
     dataset = json.loads(SEED_FILE.read_text())
     parsed = [Signal(**row) for c in dataset["competitors"] for row in c["signals"]]
-    check("seed file holds 19 signals across 3 competitors", len(parsed) == 19, f"got {len(parsed)}")
+    EXPECTED_TOTAL = 71
+    EXPECTED_COMPETITORS = 10
+    check(f"seed file holds {EXPECTED_TOTAL} signals across {EXPECTED_COMPETITORS} competitors",
+          len(parsed) == EXPECTED_TOTAL, f"got {len(parsed)}")
+    check("every signal row names the competitor it is filed under",
+          all(row["competitor"] == c["name"] for c in dataset["competitors"] for row in c["signals"]))
+    check("signal uids are unique across the whole corpus",
+          len({s.uid for s in parsed}) == len(parsed))
+    # The app sorts by date on retrieval and derives uids from the date, so a
+    # scrambled file cannot corrupt behaviour -- this is about the file staying
+    # readable as ten hand-maintained timelines, not about correctness.
+    unsorted_files = [
+        c["name"] for c in dataset["competitors"]
+        if [r["date"] for r in c["signals"]] != sorted(r["date"] for r in c["signals"])
+    ]
+    check("each competitor's signals are listed oldest-first in the file",
+          not unsorted_files, f"out of order: {unsorted_files}")
 
     by_comp: dict[str, int] = {}
     for sig in parsed:
@@ -195,12 +211,15 @@ def main() -> int:
     for comp, n in sorted(by_comp.items()):
         print(f"    {comp}: wrote {n}")
 
-    for comp, expected in (("Nimbus AI", 12), ("Vertex Cloud", 4), ("Pathfinder Labs", 3)):
-        tl = client.get_timeline(comp)
-        check(f"{comp} timeline complete ({expected})", len(tl) == expected, f"got {len(tl)}")
-        check(f"{comp} timeline is oldest-first",
+    # Asserted per-competitor against the file itself, so adding a competitor
+    # cannot silently skip the completeness and ordering checks.
+    for c in dataset["competitors"]:
+        expected = len(c["signals"])
+        tl = client.get_timeline(c["name"])
+        check(f"{c['name']} timeline complete ({expected})", len(tl) == expected, f"got {len(tl)}")
+        check(f"{c['name']} timeline is oldest-first",
               [s.date for s in tl] == sorted(s.date for s in tl))
-        check(f"{comp} carries no derived noise", all(s.summary for s in tl))
+        check(f"{c['name']} carries no derived noise", all(s.summary for s in tl))
 
     check("re-seed is idempotent (document_id replaces)",
           len(client.get_timeline("Nimbus AI")) == 12)
@@ -212,15 +231,31 @@ def main() -> int:
           {s.signal_type for s in nimbus} == {"pricing", "feature", "hiring", "messaging", "funding"})
 
     comps = {c.name: c for c in client.list_competitors()}
-    check("list_competitors sees all 3", len(comps) == 3, f"got {sorted(comps)}")
-    check("Nimbus signal_count is 12", comps["Nimbus AI"].signal_count == 12)
+    check(f"list_competitors sees all {EXPECTED_COMPETITORS}", len(comps) == EXPECTED_COMPETITORS,
+          f"got {sorted(comps)}")
+    check("per-competitor counts match the file",
+          all(comps[c["name"]].signal_count == len(c["signals"]) for c in dataset["competitors"]),
+          f"got {{{', '.join(f'{k}: {v.signal_count}' for k, v in sorted(comps.items()))}}}")
+    check("app view totals match the file",
+          sum(c.signal_count for c in comps.values()) == EXPECTED_TOTAL,
+          f"got {sum(c.signal_count for c in comps.values())}")
 
     nimbus_units = s.get(
         f"{BASE}/v1/default/banks/competitor-nimbus-ai/memories/list", params={"limit": 200}
     ).json()
-    check("app's banks hold zero derived observations (all three)",
-          not [u for u in nimbus_units["items"] if u.get("fact_type") == "observation"],
-          f"got {len([u for u in nimbus_units['items'] if u.get('fact_type') == 'observation'])}")
+    # Was "all three" when the corpus had three competitors; now it has to mean
+    # all of them, or the extra banks go unchecked and can quietly accumulate
+    # derived rows.
+    obs_banks = []
+    for c in dataset["competitors"]:
+        units = s.get(
+            f"{BASE}/v1/default/banks/competitor-{hc.slugify_competitor(c['name'])}/memories/list",
+            params={"limit": 200},
+        ).json()
+        if any(u.get("fact_type") == "observation" for u in units["items"]):
+            obs_banks.append(c["name"])
+    check(f"all {EXPECTED_COMPETITORS} banks hold zero derived observations",
+          not obs_banks, f"observations found in: {obs_banks}")
     check("raw facts >= signals (extractor may split documents)",
           nimbus_units["total"] >= 12, f"got {nimbus_units['total']}")
     distinct_uids = {(u.get("metadata") or {}).get("signal_uid") for u in nimbus_units["items"]}
@@ -245,10 +280,41 @@ def main() -> int:
           all(d in {s.date for s in nimbus} for d in
               [w.strip(".,") for w in rich.patterns.split() if re_date(w)]))
 
-    for thin in ("Vertex Cloud", "Pathfinder Labs"):
+    # Every competitor is a distinct arc, so grounding must hold across the
+    # corpus rather than only for the one competitor the demo happens to use.
+    # The double returns a fixed narrative for any timeline it considers rich,
+    # so these assert the *contract* -- populated, non-refusing fields -- and
+    # deliberately not competitor-specific wording.
+    #
+    # Three tiers, because the grounding rule has two independent clauses: "fewer
+    # than 4 signals" OR "no repeated pattern and no ordering". Vertex Cloud
+    # (4 uncorrelated signals) trips only the second, so it is checked
+    # separately from the genuinely too-thin ones -- otherwise a rule that
+    # counted signals and nothing else would pass the suite.
+    rich_names = [c["name"] for c in dataset["competitors"] if len(c["signals"]) >= 6]
+    borderline = [c["name"] for c in dataset["competitors"] if 4 <= len(c["signals"]) < 6]
+    thin_names = [c["name"] for c in dataset["competitors"] if len(c["signals"]) < 4]
+    check("corpus covers all three evidence tiers",
+          len(rich_names) >= 5 and len(thin_names) >= 2 and len(borderline) >= 1,
+          f"rich={len(rich_names)} borderline={borderline} thin={thin_names}")
+    for name in rich_names:
+        out = generate_strategic_read(name)
+        text = " ".join(str(v) for v in out.model_dump().values()).lower()
+        populated = all(
+            len(getattr(out, f)) > 30
+            for f in ("patterns", "inferred_intent", "predicted_next_move", "recommendation")
+        )
+        check(f"{name} ({len(client.get_timeline(name))} signals) yields a full argument",
+              populated and "insufficient" not in text,
+              f"got {[getattr(out, f)[:40] for f in ('patterns', 'predicted_next_move')]}")
+
+    # Caveat: the double refuses below 6 signals, so the borderline band is
+    # proven to *surface* a refusal, not proven to be refused by the real model
+    # at that count. The live run checks that band against Groq for real.
+    for thin in thin_names + borderline:
         out = generate_strategic_read(thin)
         text = " ".join(str(v) for v in out.model_dump().values()).lower()
-        check(f"{thin} refuses to fabricate a pattern",
+        check(f"{thin} ({len(client.get_timeline(thin))} signals) refuses to fabricate a pattern",
               any(k in text for k in ("insufficient", "cannot", "not predictable")))
 
     check("unknown competitor returns empty, not an error", client.get_timeline("Nobody Ltd") == [])
@@ -426,9 +492,10 @@ def main() -> int:
     from backend.main import bootstrap
 
     check("seed_from_file writes the dataset",
-          seed_from_file()["written"] == 19, f"got {seed_from_file()['written']}")
-    check("load_seed_file returns 3 competitors",
-          len(load_seed_file()) == 3, f"got {len(load_seed_file())}")
+          seed_from_file()["written"] == EXPECTED_TOTAL,
+          f"got {seed_from_file()['written']}")
+    check(f"load_seed_file returns {EXPECTED_COMPETITORS} competitors",
+          len(load_seed_file()) == EXPECTED_COMPETITORS, f"got {len(load_seed_file())}")
 
     # Behaviour, not "did it raise": bootstrap() swallows its own errors by
     # design, so asserting the absence of an exception passes even when seeding
@@ -452,18 +519,18 @@ def main() -> int:
         bootstrap()
         banks = [b for b in hc.client.list_banks()
                  if (b.get("bank_id") or "").startswith("competitor-")]
-        check("bootstrap() populates empty memory (the real deploy path)",
-              len(banks) == 3, f"got {len(banks)} banks")
+        check(f"bootstrap() populates all {EXPECTED_COMPETITORS} banks (the real deploy path)",
+              len(banks) == EXPECTED_COMPETITORS, f"got {len(banks)} banks")
 
         # The double splits documents into several facts each, so its raw
         # fact_count is legitimately ~2x the signal count. The app's own view
-        # is what must equal 19.
+        # is what must equal the corpus size.
         app_total = sum(c.signal_count for c in hc.client.list_competitors())
-        check("boot-seeded app view is 19 signals",
-              app_total == 19, f"got {app_total}")
+        check(f"boot-seeded app view is {EXPECTED_TOTAL} signals",
+              app_total == EXPECTED_TOTAL, f"got {app_total}")
         raw_after_first = sum(b.get("fact_count") or 0 for b in banks)
         check("raw fact_count >= signals (splitting is allowed)",
-              raw_after_first >= 19, f"got {raw_after_first}")
+              raw_after_first >= EXPECTED_TOTAL, f"got {raw_after_first}")
 
         bootstrap()  # a restart must not duplicate anything
         raw_after_second = sum(
@@ -474,8 +541,8 @@ def main() -> int:
         check("bootstrap() is idempotent: raw facts do not grow on restart",
               raw_after_second == raw_after_first,
               f"{raw_after_first} -> {raw_after_second}")
-        check("bootstrap() is idempotent: app view still 19 signals",
-              sum(c.signal_count for c in hc.client.list_competitors()) == 19)
+        check(f"bootstrap() is idempotent: app view still {EXPECTED_TOTAL} signals",
+              sum(c.signal_count for c in hc.client.list_competitors()) == EXPECTED_TOTAL)
     finally:
         hc.REGISTRY_FILE = real_registry
 

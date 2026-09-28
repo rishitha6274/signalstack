@@ -83,18 +83,47 @@ def cmd_seed(grouped: dict[str, list[Signal]]) -> bool:
     return ok
 
 
-def cmd_verify(grouped: dict[str, list[Signal]]) -> None:
+def cmd_verify(grouped: dict[str, list[Signal]]) -> bool:
+    """Read every timeline back and compare it to the file.
+
+    Returns False on any mismatch so drift fails the command instead of
+    scrolling past as a yellow word. This check earns its keep: editing a
+    seeded signal's *date* changes its uid, and the uid is the Hindsight
+    document_id, so a plain re-seed adds the edited row and leaves the
+    original behind as an orphan. The stored timeline then reads 13 signals
+    where the file has 7, and -- because the orphans look like a deliberate
+    "announce, then reinforce a week later" cadence -- the synthesis will
+    confidently report a pattern built out of stale rows. --reset fixes it.
+    """
     print(f"\n{BOLD}Read back from Hindsight{RESET} (chronological-complete retrieval)\n")
+    clean = True
     for name, expected in grouped.items():
         try:
             stored = hindsight_client.client.get_timeline(name)
         except hindsight_client.HindsightError as exc:
             print(f"  {name}: {YELLOW}error{RESET} {exc}")
+            clean = False
             continue
-        flag = f"{GREEN}OK{RESET}" if len(stored) == len(expected) else f"{YELLOW}MISMATCH{RESET}"
+        matched = len(stored) == len(expected)
+        clean = clean and matched
+        flag = f"{GREEN}OK{RESET}" if matched else f"{YELLOW}MISMATCH{RESET}"
         print(f"  {BOLD}{name}{RESET}: {len(stored)}/{len(expected)} signals  {flag}")
+        if not matched:
+            expected_uids = {s.uid for s in expected}
+            orphans = [s for s in stored if s.uid not in expected_uids]
+            if orphans:
+                print(
+                    f"    {YELLOW}{len(orphans)} signal(s) in memory are not in the file"
+                    f" (most likely orphaned by a date edit):{RESET}"
+                )
+                for signal in orphans:
+                    print(f"      {signal.date}  {signal.signal_type:<10} {signal.summary[:76]}")
+                print(f"    {YELLOW}run with --reset to rebuild this bank{RESET}")
+            else:
+                print(f"    {YELLOW}memory is missing signals the file defines; re-run{RESET}")
         for signal in stored:
             print(f"    {signal.date}  {signal.signal_type:<10} {signal.summary[:88]}")
+    return clean
 
 
 def main() -> int:
@@ -129,7 +158,11 @@ def main() -> int:
     ok = cmd_seed(grouped)
 
     if args.verify or ok:
-        cmd_verify(grouped)
+        # A read-back mismatch is a real failure, not advice: it means memory
+        # and the file have diverged, and synthesis will reason over whatever
+        # is actually stored there.
+        verified = cmd_verify(grouped)
+        ok = ok and verified
 
     return 0 if ok else 1
 

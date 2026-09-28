@@ -102,7 +102,7 @@ Two things were found by running against the live API, not by reading the spec.
 
 More importantly: Hindsight's observation consolidation, left on, adds a derived `observation` row for signals it considers connected. Measured on the live API, 12 retained signals produced **12 `world` facts plus 10 `observation` rows** — double the stored units, and half of them were Hindsight's own narrative of the pattern we were about to ask Groq to find. The observed behaviour is the subtle part: those observations **inherit the source fact's `tags`** (so `all_strict` does not exclude them) but **carry empty `metadata`** and no `document_id`.
 
-So the bank is created with `enable_observations: False`. This app stores discrete, dated, typed signals and does its own grounded cross-signal reasoning; Hindsight's consolidation would duplicate that step and compete with it. The result is a clean 1:1 — **19 signals in, 19 memory facts out**, `fact_count == signal_count` on every bank.
+So the bank is created with `enable_observations: False`. This app stores discrete, dated, typed signals and does its own grounded cross-signal reasoning; Hindsight's consolidation would duplicate that step and compete with it. The result is a clean 1:1 — **71 signals in, 71 memory facts out**, `fact_count == signal_count` on every bank.
 
 Two independent guards keep a derived row off the timeline regardless: the `all_strict` tag scope, and `_unit_to_signal` returning `None` for any unit without `metadata.signal_uid`. `tests/selfcheck.py` pins both, and pins the observation behaviour itself so the double cannot drift back to a fiction.
 
@@ -114,7 +114,7 @@ Two independent guards keep a derived row off the timeline regardless: the `all_
 python tests/selfcheck.py
 ```
 
-106 checks, no network, no credits. It runs the real application code against `tests/hindsight_double.py` — a double built from the published OpenAPI (`info.version 0.10.1`), not a mock that returns whatever the app happens to want. It enforces the rules a naive mock skips:
+140 checks, no network, no credits. It runs the real application code against `tests/hindsight_double.py` — a double built from the published OpenAPI (`info.version 0.10.1`), not a mock that returns whatever the app happens to want. It enforces the rules a naive mock skips:
 
 - `MemoryItem.metadata` values must be **strings**; a nested object is a 422
 - `MemoryItem.content` is required
@@ -135,7 +135,7 @@ Both bugs above were found by running the code against the real API rather than 
 
 **On thin competitors it refused, and that took a prompt fix.** Vertex Cloud (4 signals) and Pathfinder Labs (3) originally produced a *contradiction*: `patterns` correctly said "insufficient evidence of a recurring pattern", and then `predicted_next_move` went ahead and speculated anyway ("if they follow a typical quarterly cadence, they might…"). A hedged forecast of a strategy the model had just admitted it could not identify is a fabrication wearing a disclaimer. The grounding rules now require all four fields to agree — when `patterns` reports insufficient evidence, the prediction must decline and name the evidence that would settle it, and the recommendation must be to keep collecting. Both thin competitors now return a coherent, consistent refusal that names the specific missing signal types.
 
-Seeded, live-verified, and left in a clean state: **19 signals retained, 19 memory facts, `fact_count == signal_count` on all three banks.**
+Seeded, live-verified, and left in a clean state: **71 signals retained across 10 competitors, 71 memory facts, `fact_count == signal_count` on all ten banks.**
 
 ---
 
@@ -172,7 +172,7 @@ Seeded, live-verified, and left in a clean state: **19 signals retained, 19 memo
 | `scripts/seed_data.py` | loads the synthetic dataset into Hindsight |
 | `frontend/app.py` | Streamlit UI |
 | `tests/hindsight_double.py` | OpenAPI-faithful Hindsight + Groq contract double |
-| `tests/selfcheck.py` | 106-check offline end-to-end suite |
+| `tests/selfcheck.py` | 140-check offline end-to-end suite |
 
 ### API
 
@@ -208,7 +208,9 @@ cp .env.example .env
 python scripts/seed_data.py --reset --verify
 ```
 
-This writes 19 signals across 3 competitors into Hindsight and reads them back. Re-running without `--reset` is safe — signals are keyed by `document_id`, so they are replaced rather than duplicated.
+This writes 71 signals across 10 competitors into Hindsight and reads them back. Re-running without `--reset` is safe *for identical data* — signals are keyed by `document_id`, so unchanged rows are replaced rather than duplicated.
+
+**Editing a seeded signal's date orphans the original.** The uid is `slug | date | type | digest`, and that uid *is* the Hindsight `document_id`, so changing a date produces a new document and the old one stays behind. Brightline's bank silently held 13 signals where the file had 7 — and because the orphans were the same announcements a fortnight earlier, the synthesis read them as a genuine "announce, then reinforce a week later" cadence and reported it as a finding. `--verify` now fails the command on any read-back mismatch and names the orphaned rows; `--reset` rebuilds the bank.
 
 ### Run
 
@@ -247,7 +249,28 @@ All fictional. No live scraping, so the demo cannot be broken by a rate limit or
 
 The `2026-03-11` feature release is planted on purpose: it is unrelated to the strategy, so a model that pattern-matches everything rather than reasoning across types will latch onto the wrong thread.
 
-**Vertex Cloud (4 signals) and Pathfinder Labs (3 signals)** are intentionally thin and uncorrelated — no funding, no hiring cluster, no pricing sequence. They are the control group for "does not hallucinate patterns from sparse data."
+### The rest of the corpus
+
+Ten competitors, 71 signals, chosen so the retrieval and grounding paths get exercised rather than just the demo case. Each has a genuinely different arc, and the end dates are deliberately uneven so evidence staleness is visible in the product:
+
+| Competitor | n | Arc | Evidence |
+|---|---|---|---|
+| Nimbus AI | 12 | Series C → enterprise land-grab | **stale** (14-day rhythm, 40d quiet) |
+| Palisade Security | 11 | Incident → compliance rebuild → federal | fresh (3d) |
+| Lumen Health | 9 | Regulated-market compliance chain | **aging** (48d) |
+| Corvus Data | 8 | Open-core → commercial cloud | fresh (4d) |
+| Halcyon Mobility | 8 | Utility pricing → fleet platform | fresh (6d) |
+| Brightline Retail | 7 | Metronomic 28-day cadence, then silence | **stale** (28-day rhythm, 84d quiet) |
+| Ferrous Systems | 6 | Hardware → software and services | fresh (12d) |
+| Vertex Cloud | 4 | Uncorrelated incumbent | fresh (47d, but 76-day rhythm) |
+| Pathfinder Labs | 3 | Sparse devtools | fresh (54d) |
+| Tidewater Analytics | 3 | Sparse BI vendor | fresh (53d) |
+
+Three things are worth pulling out:
+
+- **Brightline Retail is the stale-evidence case that matters.** Its cadence is exactly 28 days for six consecutive intervals, then stops. The gap cannot distinguish *the cadence broke* from *the cadence continued and someone stopped watching*, and the read says so rather than projecting the old rhythm as if it were live. Live, it reports the cadence, forecasts to 2026-10-15, and adds *"this forecast rests on a signal stream that has been quiet for 84 days, so confidence is limited."*
+- **Vertex Cloud is the borderline case.** At 4 signals it clears the prompt's count rule ("fewer than 4 signals") but not its substance rule. Live, the model computes the intervals itself (77d, 83d, 43d), finds no cadence, and refuses on that basis — which exercises the second clause of the rule independently of the first. The offline double refuses below 6 signals, so it can only prove the app *surfaces* that refusal; this band is verified against Groq, not the double.
+- **The infrequent competitors are not stale.** Vertex Cloud (76-day rhythm), Pathfinder Labs (70-day) and Tidewater Analytics (91-day) are all quiet for 47–54 days and all read as current. A fixed 30-day threshold would have flagged all three, and warned you about companies that simply do not announce often.
 
 ---
 
@@ -255,8 +278,9 @@ The `2026-03-11` feature release is planted on purpose: it is unrelated to the s
 
 1. **One signal means nothing.** Select *Nimbus AI*, set memory depth to **"1 signal (no pattern possible)"**. "That's the entire story: they raised money. Congratulations."
 2. **Reveal the accumulation.** Switch to **"Full timeline"** — 12 signals over six months, colour-coded by type. "This wasn't scraped. Every one of these is a separate memory write, and they're all still there."
-3. **Get the strategic read.** Click **🧠 Get Strategic Read**. The output connects funding → hiring → pricing → messaging, and ends in a falsifiable prediction. Note the caption: *built from 12 signals (2026-02-18 to 2026-08-19)*.
+3. **Get the strategic read.** Click **🧠 Get Strategic Read**. The output connects funding → hiring → pricing → messaging, and ends in a falsifiable prediction. Note the caption: *built from 12 signals (2026-02-18 to 2026-08-19)*, and the warning that the evidence is 40 days old.
 4. **Contrast.** Switch to *Vertex Cloud* and read it again: "Only 4 signals, no repeated cadence, no ordering. The evidence is insufficient to identify a pattern." The agent declines to fabricate — which is the harder and more valuable behaviour to demonstrate.
+5. **Stale evidence.** Switch to *Brightline Retail*. The pattern section finds a precise 28-day cadence, the prediction is dated forward, and both carry the caveat that the timeline stopped 84 days ago. This is what a correct answer looks like when the data has gone cold.
 
 Optional: the **Log a new signal** expander shows live ingestion — paste a raw note, the LLM extracts `{signal_type, date, summary, source}`, and it is written to that competitor's Hindsight bank and appears on the timeline.
 
