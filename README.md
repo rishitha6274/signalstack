@@ -114,7 +114,7 @@ Two independent guards keep a derived row off the timeline regardless: the `all_
 python tests/selfcheck.py
 ```
 
-275 checks, no network, no credits. It runs the real application code against `tests/hindsight_double.py` — a double built from the published OpenAPI (`info.version 0.10.1`), not a mock that returns whatever the app happens to want. It enforces the rules a naive mock skips:
+279 checks, no network, no credits. It runs the real application code against `tests/hindsight_double.py` — a double built from the published OpenAPI (`info.version 0.10.1`), not a mock that returns whatever the app happens to want. It enforces the rules a naive mock skips:
 
 - `MemoryItem.metadata` values must be **strings**; a nested object is a 422
 - `MemoryItem.content` is required
@@ -125,7 +125,7 @@ python tests/selfcheck.py
 
 It then exercises the seeded dataset, idempotent re-seeding, timeline ordering, synthesis grounding, thin-competitor refusal, time anchoring and evidence staleness, live ingestion, and each malformed-LLM recovery path.
 
-The last two sections are the ones worth trusting. Section 9 replays five specific defects found by auditing the real 10-competitor run — an unsupported "repeats three times", a silent 26-day gap, a skipped cycle stage, a confident read with no confidence field, a fabricated 30-day cadence — and pins the current behaviour against each. Section 10 then deletes each new rule from the source, in a mutated copy of the module, and asserts the corresponding test **stops firing**: 33 mutations, each of which must break something, so none of those tests can pass for the wrong reason. A check that fails on the real code is a bug; a check that still passes with its own rule deleted is a test that proves nothing.
+The last two sections are the ones worth trusting. Section 9 replays five specific defects found by auditing the real 10-competitor run — an unsupported "repeats three times", a silent 26-day gap, a skipped cycle stage, a confident read with no confidence field, a fabricated 30-day cadence — and pins the current behaviour against each. Section 10 then deletes each new rule from the source, in a mutated copy of the module, and asserts the corresponding test **stops firing**: 35 mutations, each of which must break something, so none of those tests can pass for the wrong reason. A check that fails on the real code is a bug; a check that still passes with its own rule deleted is a test that proves nothing.
 
 Seven of those mutations re-introduce defects found by the *second* audit, verbatim: a refusal allowed to report `high`/`medium`/`low`, the retry notice asking the wrong end of the confidence contract, the permitted-number list dropped from the notice, a withheld narrative not flagged as withheld, the digits-only interval pattern, the indefinite article read as the quantity, and the cadence cue that keeps "within a month" from being read as a measured cadence. Each is pinned to the test that caught it, so the fix cannot be reverted silently.
 

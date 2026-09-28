@@ -17,7 +17,6 @@ brief asks for. Two things make it work:
 from __future__ import annotations
 
 import logging
-import re
 import statistics
 from dataclasses import dataclass
 from datetime import date
@@ -289,38 +288,52 @@ def _coerce_confidence(value: object) -> Confidence:
     An unrecognised label becomes "low" rather than "none": a read that
     returned a forecast has *made* an assertion, and downgrading its certainty
     is the honest reading. "none" is reserved for an actual refusal, which is
-    what `_is_refusal` decides.
+    what `is_refusal` decides — and because it decides that, this function
+    must not hand out "none" by accident.
     """
     text = str(value or "").strip().lower()
     for candidate in Confidence:
         if text == candidate.value:
             return candidate
     # Tolerate a little decoration: "Confidence: high (one caveat)".
+    #
+    # Never for "none", though. Unlike "high" or "low" it is an ordinary English
+    # word, so the substring match reads "None of the evidence supports a
+    # forecast" as a refusal when the model made exactly the forecast it was
+    # describing. The exact match above already covers the decorated form that
+    # matters ("none", "Confidence: none"); anything longer is a phrase, and a
+    # phrase in this field is not a decision.
     for candidate in Confidence:
+        if candidate is Confidence.none:
+            continue
         if candidate.value in text:
             return candidate
     return Confidence.low
 
 
-def _is_refusal(parsed: dict) -> bool:
-    """Did the model decline to forecast, or assert a low-confidence forecast?
+def is_refusal(parsed: dict) -> bool:
+    """Did the model decline to forecast? The structured field is the answer.
 
-    Only a genuine "no prediction can be made" counts. The distinction matters
-    because a refusal is exempt from the consistency and interval checks — it
-    makes no claim to contradict — but is still required to be calibrated.
+    A read is a refusal if and only if it reports ``confidence: "none"``. Nothing
+    else gets a vote.
+
+    This used to scan the prose for "insufficient evidence", "cannot determine"
+    and similar, on the reasoning that a refusal is a claim about the evidence.
+    That was the wrong kind of rule: it read the model's vocabulary instead of
+    its decision, so the same competitor could be classified differently
+    depending on which words it happened to reach for. In the live sweep a
+    competitor with 11 signals was classified as a refusal because its
+    narrative happened to contain "evidence is insufficient" — a sentence
+    describing the timeline, not declining to forecast. The first attempt was
+    rejected as "a refusal must report confidence 'none'" for a read that had
+    been perfectly willing to forecast, and the retry then talked it into
+    refusing. The outcome was defensible; the path to it was a coin flip.
+
+    A structured field exists precisely so this decision does not need a
+    heuristic. If the model means to decline, it says so in `confidence`, and
+    the same field is what the reader and the audit see.
     """
-    prediction = str(parsed.get("predicted_next_move") or "").lower()
-    patterns = str(parsed.get("patterns") or "").lower()
-    haystack = f"{prediction} {patterns}"
-    return bool(
-        re.search(
-            r"no (?:reliable|concrete|specific|credible) prediction|"
-            r"cannot (?:be )?(?:predict|forecast|determine|be determined)|"
-            r"evidence insufficient|insufficient (?:evidence|signal)|"
-            r"too (?:few|little) signals",
-            haystack,
-        )
-    )
+    return _coerce_confidence(parsed.get("confidence")) is Confidence.none
 
 
 def _correction_notice(problems: list[str], facts) -> str:
@@ -572,7 +585,7 @@ def generate_strategic_read(
         if attempt == 0 and problems:
             pass
         problems = validate_response(
-            parsed, facts, timeline_text, refused=_is_refusal(parsed)
+            parsed, facts, timeline_text, refused=is_refusal(parsed)
         )
         if not problems:
             break

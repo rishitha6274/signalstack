@@ -631,7 +631,7 @@ def main() -> int:
                                     _retry_after_seconds)
     from backend.models import Confidence as _Conf, Signal
     from backend.synthesis import (_coerce_confidence, _correction_notice,
-                                   _is_refusal, _unvalidated_response,
+                                   is_refusal as _is_refusal, _unvalidated_response,
                                    evidence_clock, timeline_window as _tw)
 
     _TODAY = date(2026, 9, 28)          # the audit date, pinned
@@ -945,16 +945,41 @@ def main() -> int:
                                       if k != "missing_evidence"},
                                      nimbus_facts, nimbus_tl, refused=True)),
           "a refusal with no named observation passed")
-    check("D: refusals are detected, and an ordinary forecast is not misread as one",
-          _is_refusal(refusal)
-          and not _is_refusal(acknowledged)
+    check("D: refusal is decided by the confidence field and nothing else",
+          _is_refusal({**PRE_FIX, "confidence": "none"})
+          and not _is_refusal({**PRE_FIX, "confidence": "low"})
+          and not _is_refusal({**PRE_FIX, "confidence": "medium"})
+          and not _is_refusal({**PRE_FIX, "confidence": "high"})
           and not _is_refusal(PRE_FIX),
-          "refusal detection is wrong")
-    check("D: a forecast carrying the word 'insufficient' in passing is not a refusal",
+          "refusal classification is not following the structured field")
+    check("D: prose that sounds like a refusal does not make one",
           not _is_refusal({**PRE_FIX,
                            "patterns": "The 2026-04-15 cut was insufficient to move "
-                                       "enterprise buyers, so they re-priced in May."}),
-          "a mid-sentence 'insufficient' was read as a refusal")
+                                       "enterprise buyers, so they re-priced in May.",
+                           "predicted_next_move": "They re-price within two weeks."}),
+          "a narrative was classified as a refusal on its wording")
+    check("D: prose cannot talk a reader into 'none' either",
+          not _is_refusal({**PRE_FIX,
+                           "confidence": "None of these observations support a "
+                                         "cadence, but the feature/hiring pairing is real."}),
+          "an English 'none' inside the confidence field became a refusal")
+    check("D: a refusal keeps the exemption and still owes its calibration",
+          # The exemption is real: a refusal is not asked to forecast.
+          not _val.validate_response(
+              {"patterns": "No transition repeats.", "inferred_intent": "None.",
+               "predicted_next_move": "No reliable prediction can be made.",
+               "recommendation": "Keep collecting signals.",
+               "confidence": "none",
+               "missing_evidence": "A second occurrence of any transition."},
+              nimbus_facts, nimbus_tl, refused=True)
+          # and it is not an exemption from saying how sure it is.
+          and _val.validate_response(
+              {"patterns": "No transition repeats.", "inferred_intent": "None.",
+               "predicted_next_move": "No reliable prediction can be made.",
+               "recommendation": "Keep collecting signals.",
+               "confidence": "none"},
+              nimbus_facts, nimbus_tl, refused=True) == ["missing_evidence is absent"],
+          "the refusal branch is not holding refusals to the calibration rules")
 
     # -- E. every stated interval must be one the FACTS block supports -------
     check("E: Lumen's real intervals are 21-36 days, median 26",
@@ -1526,6 +1551,31 @@ def main() -> int:
                       m["val"].validate_response({**refusal, "confidence": "medium"},
                                                  m["F"](_seed["Nimbus AI"]),
                                                  nimbus_tl, refused=True)),
+    )
+    _mutates(
+        "D: deciding refusal from the prose again",
+        # Deliberately not `re.search`: the module no longer imports `re`, and a
+        # mutant that raises would prove nothing about the rule it replaced.
+        lambda: _stack(synthesis=_mutant_from(
+            "backend.synthesis",
+            replacements=[('    return _coerce_confidence(parsed.get("confidence"))'
+                           " is Confidence.none",
+                           "    return 'insufficient' in (  # MUTANT: prose again\n"
+                           "        str(parsed.get('patterns', '')).lower()\n"
+                           "        + str(parsed.get('predicted_next_move', '')).lower())")])),
+        lambda m: not m["syn"].is_refusal(
+            {**PRE_FIX,
+             "patterns": "The 2026-04-15 cut was insufficient to move enterprise "
+                         "buyers, so they re-priced in May.",
+             "confidence": "low"}),
+    )
+    _mutates(
+        "D: letting the coercer hand out 'none' by substring",
+        lambda: _stack(synthesis=_mutant_from(
+            "backend.synthesis",
+            replacements=[("        if candidate is Confidence.none:\n            continue\n", "")])),
+        lambda m: m["syn"]._coerce_confidence(
+            "None of these observations support a cadence") is _Conf.low,
     )
     _mutates(
         "D: removing the quote check",
