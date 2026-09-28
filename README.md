@@ -388,3 +388,32 @@ The brief warns that Groq's `gpt-oss` models intermittently produce malformed or
 - **Extraction quality is only as good as the note.** The heuristic fallback is deliberately dumb; it exists so a demo button never dead-ends, not as a production path.
 - **Semantic recall is unused by design.** That is the right call for pattern detection, but it means "what did Nimbus say about audit logs?" is answered by string-matching the timeline rather than by Hindsight's graph search. Adding it as a *secondary* lookup would be a natural next step — never as the primary timeline source.
 - **`synthesis.py` spends a whole timeline into one prompt.** Past a few hundred signals per competitor this needs chunking or Hindsight's own `reflect` operation to stay inside the context window.
+
+---
+
+## Known limitations
+
+The honest edges of the system, kept apart from the feature documentation above.
+
+- **The evidence floor and the dispersion guard are corpus-tuned heuristics, not measured thresholds.** `MIN_SIGNALS_FOR_EVIDENCE = 5` and `MAX_INTERVAL_SPREAD = 3` were chosen so the 3–4-signal designed refusals (Vertex Cloud, Pathfinder Labs) sit below the floor and the 6+ designed forecasts sit above it. They are supported by 4 live reads — Palisade Security, Ferrous Systems, Nimbus AI, Vertex Cloud — plus 45 offline mutation tests. They are **not** measured across the full 10-competitor corpus, and no competitor comes near the dispersion limit, so that guard is exercised only by synthetic input. A larger or differently-shaped corpus would need the floor re-tuned.
+
+- **A low-confidence read may decline to forecast rather than being treated as a refusal.** Ferrous Systems (6 signals, above the floor) returns `confidence: low` with a `predicted_next_move` of "No reliable prediction can be made at this time." The structured `confidence` field, not the prose, decides whether a read is a refusal — so this is a narrative by rule even though it declines to predict. No "must actually predict" validator was added on purpose: it would reject Ferrous and push it back to a refusal, which is precisely the vocabulary-driven behaviour the evidence-sufficiency rule exists to remove. This is a known, accepted edge, not an oversight.
+
+- **Trend consistency (failure mode C) is prompt-enforced, not programmatically verified.** No validator checks a prediction against the types of the most recent signals. The prompt asks for a trend-consistent read and the audit's mode-C heuristic is only a keyword guess, but nothing in `validators.py` enforces it — a prediction contradicting the latest signal types would pass. Staleness/overdue (mode B) *is* enforced programmatically, by `check_overdue_acknowledged`.
+
+- **Only manual/seeded input is supported; live scraping was scoped out deliberately.** Competitor text is a prompt-injection surface: a scraped page can carry instructions the model reads as part of the read. Until there is an isolation and sanitisation layer, ingestion is paste-a-signal plus the seeded dataset, and nothing is fetched from the web.
+
+### Audit failure modes, before and after
+
+Five failure modes were checked programmatically across all 10 competitors' live reads — A: overclaimed repetition · B: ignored staleness · C: prediction contradicts the latest trend · D: missing calibration or verbatim grounding · E: arithmetic or date error.
+
+| Failure mode | Original baseline (prose refusal rule) | Final sweep (field refusal rule) |
+| --- | --- | --- |
+| A — overclaimed repetition | 3 | 0 |
+| B — ignored staleness | 2 | 0 |
+| C — contradicts latest trend | 1 | 0 |
+| D — missing calibration / grounding | 7 | 0 |
+| E — arithmetic or date error | 6 | 0 |
+| **Total failures** | **19** | **0** |
+
+*Footnote — this is not a controlled A/B.* The refusal classifier changed mid-project from prose-based (grepping the narrative for "insufficient evidence") to field-based (`confidence == "none"`). The original baseline above was measured under the prose rule; only the final sweep was measured under the current field rule. The improvement is indicative, not a like-for-like experiment.
