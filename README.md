@@ -6,6 +6,8 @@ Most competitor tracking is a list of disconnected facts. Signal Stack remembers
 
 A single price cut is just a price cut. Three price cuts in six months, each following a funding round, is a strategy.
 
+*Built with an AI coding agent. The rules, the offline suite and the audits in this README were written and revised in collaboration with one; every number quoted here was produced by running the code, not by asking a model what it thought the answer was.*
+
 ---
 
 ## The problem
@@ -71,9 +73,9 @@ Pagination is paged to exhaustion with a ceiling (`MAX_TIMELINE_PAGES`), then de
 `backend/synthesis.py` formats the complete timeline as a numbered, dated list and uses the prompt from the brief verbatim, plus a grounding addendum that enforces two things:
 
 - every claim cites a date that exists in the timeline;
-- **if the timeline has fewer than 4 signals, or shows no repeated pattern and no ordering, the model must say the evidence is insufficient.**
+- **whether the evidence is sufficient is decided by the timeline's shape, not by the model's willingness.** A timeline is sufficient when it has **at least 5 signals** and its **longest gap is within 3x its median interval**. Below the floor, the only accepted answer is a refusal (`confidence: none`); at or above it, a refusal is **rejected**. Above the floor with nothing repeating, confidence is capped at `medium` and `missing_evidence` must disclose that no transition has repeated.
 
-That second rule is what makes the contrast demo work. Ask about a competitor with four uncorrelated signals and the agent reports that it cannot distinguish a strategy from routine maintenance — instead of manufacturing one to fill the shape of the answer.
+That second rule is what makes the contrast demo work, and it is enforced in code rather than left to the prompt. Ask about a competitor with four uncorrelated signals and the agent reports that it cannot distinguish a strategy from routine maintenance — instead of manufacturing one to fill the shape of the answer. Conversely, a rich timeline is not allowed to decline: Palisade Security has 11 signals and no repeated transition pair, and it still returns a forecast, because "nothing has repeated" is a fact about the evidence and not a reason to refuse.
 
 **4b. The read knows what day it is, and is honest when the evidence has gone stale.**
 
@@ -105,6 +107,16 @@ More importantly: Hindsight's observation consolidation, left on, adds a derived
 So the bank is created with `enable_observations: False`. This app stores discrete, dated, typed signals and does its own grounded cross-signal reasoning; Hindsight's consolidation would duplicate that step and compete with it. The result is a clean 1:1 — **71 signals in, 71 memory facts out**, `fact_count == signal_count` on every bank.
 
 Two independent guards keep a derived row off the timeline regardless: the `all_strict` tag scope, and `_unit_to_signal` returning `None` for any unit without `metadata.signal_uid`. `tests/selfcheck.py` pins both, and pins the observation behaviour itself so the double cannot drift back to a fiction.
+
+### Why we do not use recall, reflect or observations
+
+Hindsight offers `recall`, `reflect` and observation consolidation, and this app uses none of them as its primary path. That is a decision, not an oversight.
+
+- **`recall`** is a relevance-ranked semantic search. It answers "what is similar to this?", which is the wrong question for pattern detection — "what happened, in order, on which date?" Pattern detection needs the *complete ordered timeline*, because the signal that matters is often the one that never repeated, and a relevance-ranked top-k will happily drop it. A prediction grounded in a partial timeline is not a weaker prediction, it is a differently-shaped one, and the difference is invisible to the reader.
+- **`reflect`** is Hindsight's own synthesis pass. Calling it and then also synthesising would mean two models producing two narratives over the same bank, with no rule for which one wins. Keeping synthesis in `backend/synthesis.py` means the grounding rules, the confidence contract and the validators all apply to a single place, and the read is reproducible: same timeline, same prompt, one output.
+- **Observations** are disabled at bank creation (`enable_observations: False`). Hindsight's consolidation would derive its own summaries of each document, which duplicates work this app already does with typed, dated signals — and it would put undated derived prose on the timeline, which is precisely the material that makes a forecast unfalsifiable. The two guards described above keep derived rows off the timeline even so.
+
+The trade is real and worth naming: "what did Nimbus say about audit logs?" is answered by string-matching the timeline rather than by Hindsight's graph search. Adding `recall` as a *secondary* lookup would be a natural next step — never as the primary timeline source.
 
 ---
 
@@ -176,7 +188,7 @@ Seeded, live-verified, and left in a clean state: **71 signals retained across 1
 | `scripts/seed_data.py` | loads the synthetic dataset into Hindsight |
 | `frontend/app.py` | Streamlit UI |
 | `tests/hindsight_double.py` | OpenAPI-faithful Hindsight + Groq contract double |
-| `tests/selfcheck.py` | 140-check offline end-to-end suite |
+| `tests/selfcheck.py` | 315-check offline end-to-end suite, 45 mutations |
 
 ### API
 
@@ -273,7 +285,7 @@ Ten competitors, 71 signals, chosen so the retrieval and grounding paths get exe
 Three things are worth pulling out:
 
 - **Brightline Retail is the stale-evidence case that matters.** Its cadence is exactly 28 days for six consecutive intervals, then stops. The gap cannot distinguish *the cadence broke* from *the cadence continued and someone stopped watching*, and the read says so rather than projecting the old rhythm as if it were live. Live, it reports the cadence, forecasts to 2026-10-15, and adds *"this forecast rests on a signal stream that has been quiet for 84 days, so confidence is limited."*
-- **Vertex Cloud is the borderline case.** At 4 signals it clears the prompt's count rule ("fewer than 4 signals") but not its substance rule. Live, the model computes the intervals itself (77d, 83d, 43d), finds no cadence, and refuses on that basis — which exercises the second clause of the rule independently of the first. The offline double refuses below 6 signals, so it can only prove the app *surfaces* that refusal; this band is verified against Groq, not the double.
+- **Vertex Cloud refuses because it is below the evidence floor.** It has 4 signals, one short of the 5-signal floor, so `confidence: none` is the only answer the validators accept. Its intervals (76d, 83d, 43d) are regular enough to have a median of 76d, which is exactly why it is the useful contrast: the read is not refusing because the timeline looks erratic, it is refusing because there is too little of it. The refusal names the specific signal that would settle it.
 - **The infrequent competitors are not stale.** Vertex Cloud (76-day rhythm), Pathfinder Labs (70-day) and Tidewater Analytics (91-day) are all quiet for 47–54 days and all read as current. A fixed 30-day threshold would have flagged all three, and warned you about companies that simply do not announce often.
 
 ---
@@ -283,7 +295,7 @@ Three things are worth pulling out:
 1. **One signal means nothing.** Select *Nimbus AI*, set memory depth to **"1 signal (no pattern possible)"**. "That's the entire story: they raised money. Congratulations."
 2. **Reveal the accumulation.** Switch to **"Full timeline"** — 12 signals over six months, colour-coded by type. "This wasn't scraped. Every one of these is a separate memory write, and they're all still there."
 3. **Get the strategic read.** Click **🧠 Get Strategic Read**. The output connects funding → hiring → pricing → messaging, and ends in a falsifiable prediction. Note the caption: *built from 12 signals (2026-02-18 to 2026-08-19)*, and the warning that the evidence is 40 days old.
-4. **Contrast.** Switch to *Vertex Cloud* and read it again: "Only 4 signals, no repeated cadence, no ordering. The evidence is insufficient to identify a pattern." The agent declines to fabricate — which is the harder and more valuable behaviour to demonstrate.
+4. **Contrast.** Switch to *Vertex Cloud* and read it again. It has 4 signals — one short of the 5-signal evidence floor — so the read is a refusal by rule, and it names the specific missing signal that would settle the question. "The evidence is below the floor for a confident read; one more signal would change that." The agent declines to fabricate, which is the harder and more valuable behaviour to demonstrate.
 5. **Stale evidence.** Switch to *Brightline Retail*. The pattern section finds a precise 28-day cadence, the prediction is dated forward, and both carry the caveat that the timeline stopped 84 days ago. This is what a correct answer looks like when the data has gone cold.
 
 Optional: the **Log a new signal** expander shows live ingestion — paste a raw note, the LLM extracts `{signal_type, date, summary, source}`, and it is written to that competitor's Hindsight bank and appears on the timeline.
@@ -394,6 +406,10 @@ The brief warns that Groq's `gpt-oss` models intermittently produce malformed or
 ## Known limitations
 
 The honest edges of the system, kept apart from the feature documentation above.
+
+- **Staleness figures are relative to the date you read this.** Every "40 days overdue", "84 days", "47 days" and "2026-09-25" in this README was computed against **2026-09-28**, the audit date, and the seeded dataset is frozen as of then. Re-run tomorrow and the overdue counts grow, the staleness bands move, and a forecast the model dates forward may be generated about a window that has already closed. The seeded dates themselves do not move, so the *cadence* claims stay true and only the staleness claims decay.
+
+- **The fallback model id is unverified against the live account.** `GROQ_FALLBACK_MODEL` defaults to `qwen/qwen3.8-27b` and the offline double serves that exact string, so the suite proves the fallback is wired consistently — not that Groq's `GET /models` lists it for your account. If the primary model is ever unavailable, verify that id before the demo; a stale default will surface as a provider error rather than a silent fallback.
 
 - **The evidence floor and the dispersion guard are corpus-tuned heuristics, not measured thresholds.** `MIN_SIGNALS_FOR_EVIDENCE = 5` and `MAX_INTERVAL_SPREAD = 3` were chosen so the 3–4-signal designed refusals (Vertex Cloud, Pathfinder Labs) sit below the floor and the 6+ designed forecasts sit above it. They are supported by 4 live reads — Palisade Security, Ferrous Systems, Nimbus AI, Vertex Cloud — plus 45 offline mutation tests. They are **not** measured across the full 10-competitor corpus, and no competitor comes near the dispersion limit, so that guard is exercised only by synthetic input. A larger or differently-shaped corpus would need the floor re-tuned.
 
