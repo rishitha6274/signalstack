@@ -22,8 +22,24 @@ import streamlit as st
 # --------------------------------------------------------------------------
 # Config
 # --------------------------------------------------------------------------
-API_BASE = os.getenv("SIGNAL_STACK_API", "http://localhost:8000").rstrip("/")
+# The API base URL is resolved in priority order:
+#   BACKEND_URL        — what the deployed frontend uses to reach the deployed
+#                         backend. This is the name the deploy docs and the
+#                         host dashboards set.
+#   SIGNAL_STACK_API   — the original single-image name, still honoured so the
+#                         Docker/local path (UI and API in one container over
+#                         loopback) keeps working untouched.
+#   localhost:8000     — local development fallback.
+API_BASE = (
+    os.getenv("BACKEND_URL") or os.getenv("SIGNAL_STACK_API") or "http://localhost:8000"
+).rstrip("/")
 REQUEST_TIMEOUT = int(os.getenv("SIGNAL_STACK_TIMEOUT", "180"))
+# Optional write key, forwarded to the API on POSTs when set. Same variable
+# name the backend reads, so setting it once on both services is enough.
+# Unset locally: the API's guard is a no-op, so the header is simply omitted
+# rather than sent empty.
+API_KEY = (os.getenv("API_KEY") or "").strip()
+WRITE_HEADERS = {"X-API-Key": API_KEY} if API_KEY else {}
 
 TYPE_COLORS = {
     "pricing": "#e8590c",
@@ -47,13 +63,31 @@ SECTIONS = [
     ("Recommended action", "recommendation", "⚡"),
 ]
 
+# The note behind "Try the sample". Dated inside the seeded window and chosen
+# so that taking Vertex Cloud from 4 signals to 5 crosses the app's evidence
+# floor — at which point the read is permitted to forecast instead of
+# refusing. tests/selfcheck.py section 5b pins that this actually happens, so
+# the sample cannot silently stop working if the seed or the floor changes.
+SAMPLE_VERTEX_SIGNAL = (
+    "Vertex Cloud posted a compliance engineer opening on 2026-09-14, its first "
+    "security hire, and named FedRAMP readiness as the requirement."
+)
+
 
 # --------------------------------------------------------------------------
 # API helpers
 # --------------------------------------------------------------------------
 def api(method: str, path: str, **kwargs) -> Any:
+    # The write key rides on writes only, and only when configured. GETs stay
+    # unauthenticated on purpose so the demo's reads need no key. Keyed off the
+    # method rather than assumed, because the comment above used to describe a
+    # behaviour the code did not have: a shared secret sent on reads widens its
+    # exposure to every log line and proxy that handles a GET.
+    headers = {**(WRITE_HEADERS if method.upper() not in ("GET", "HEAD") else {}),
+               **kwargs.pop("headers", {})}
     response = requests.request(
-        method, f"{API_BASE}{path}", timeout=REQUEST_TIMEOUT, **kwargs
+        method, f"{API_BASE}{path}", timeout=REQUEST_TIMEOUT, headers=headers,
+        **kwargs
     )
     if response.status_code >= 400:
         try:
@@ -71,6 +105,51 @@ def fetch_competitors(_signature: float = 0.0) -> list[dict]:
 
 def fetch_timeline(competitor: str) -> list[dict]:
     return api("GET", f"/timeline/{competitor}")["signals"]
+
+
+def memory_delta(competitor: str, stored: dict) -> None:
+    """What actually changed in memory, read back from Hindsight.
+
+    Three things, in this order, because they answer three different questions
+    a user has just after logging a note: how much do I have now (count), is
+    the store consistent with that count (fact_count), and when did it last
+    change (last_write_at). The new signal itself is shown as a row in the
+    same shape the timeline uses, fetched back from memory rather than echoed
+    from the POST response — a write that reported success but did not land
+    would otherwise render as a success.
+
+    Rendered even when the follow-up read is rate-limited or absent. The write
+    is the irreversible part of the interaction, so its receipt must not be
+    conditional on a second, separately-failable LLM call.
+    """
+    try:
+        rows = fetch_competitors()
+        bank = next((r for r in rows if r.get("name") == competitor), None)
+    except Exception:  # noqa: BLE001
+        bank = None
+    if bank:
+        st.caption(
+            f"**{bank.get('signal_count', '?')} signals** in `{bank.get('bank_id')}`"
+            f" · {bank.get('fact_count', '?')} memory facts"
+            f" · last written {bank.get('last_write_at') or 'unknown'}"
+        )
+    else:
+        st.caption(f"Stored against **{competitor}**.")
+
+    try:
+        timeline = fetch_timeline(competitor)
+    except Exception as exc:  # noqa: BLE001
+        st.caption(f"Could not read the timeline back: {friendly_read_error(exc)}")
+        return
+    match = [r for r in timeline if r.get("uid") == stored.get("uid")]
+    row = match[0] if match else (timeline[-1] if timeline else None)
+    if row:
+        st.markdown(
+            f"- `{row.get('date')}` · {row.get('signal_type')} · "
+            f"{row.get('summary', '')[:160]}"
+        )
+    else:
+        st.markdown(f"- `{stored.get('date')}` · {stored.get('signal_type')} *(read-back pending)*")
 
 
 def type_badge(signal_type: str) -> str:
@@ -106,6 +185,55 @@ def confidence_badge(confidence: str | None) -> str:
         f'letter-spacing:.4px;text-transform:uppercase;white-space:nowrap">'
         f"{glyph} {label}</span>"
     )
+
+
+def friendly_read_error(exc: Exception) -> str:
+    """Turn a failed read into something a person can act on.
+
+    A 429 is the one failure that is not the reader's fault and not a bug, so
+    it gets a wait, not a stack trace. `api` raises the response text, which
+    for a rate limit carries the number of seconds the provider asked for.
+    """
+    text = str(exc)
+    lowered = text.lower()
+    if "429" in lowered or "rate limit" in lowered or "too many requests" in lowered:
+        import re
+
+        wait = re.search(r"(\d+(?:\.\d+)?)\s*s(?:econds)?", text)
+        secs = f" about {int(float(wait.group(1)))}s" if wait else ""
+        return (
+            f"**Groq's rate limit is being hit for this minute.** Nothing is wrong with "
+            f"the data or your key — wait{secs} and read again. The signals you logged "
+            "are already stored."
+        )
+    if "401" in lowered or "unauthorized" in lowered:
+        return (
+            "**The API rejected the request (401).** If `API_KEY` is set, the "
+            "frontend and backend need the same value."
+        )
+    return f"Read failed: {text}"
+
+
+def read_headline(read: dict, key: str) -> str:
+    """One line of a read, for the side-by-side diff."""
+    value = str(read.get(key) or "").strip()
+    if not value:
+        return "—"
+    return value if len(value) <= 400 else value[:397].rstrip() + "…"
+
+
+# The fields worth diffing after a signal lands. Chosen because each one is a
+# claim the reader might act on: how much memory, how much to trust it, how old
+# the evidence is, what happens next, and what would change their mind. A diff
+# that showed only the prose would miss the one thing a new signal usually
+# moves — the confidence.
+DIFF_FIELDS = [
+    ("Signals in memory", "signal_count"),
+    ("Confidence", "confidence"),
+    ("Evidence staleness", "evidence_staleness"),
+    ("Predicted next move", "predicted_next_move"),
+    ("What would raise confidence", "missing_evidence"),
+]
 
 
 # --------------------------------------------------------------------------
@@ -181,6 +309,64 @@ with st.sidebar:
     st.caption(f"**Stored** {record.get('last_write_at') or '—'}")
     if record.get("first_signal"):
         st.caption(f"**Window** {record['first_signal']} → {record['last_signal']}")
+    if record.get("fact_count"):
+        st.caption(f"**Memory units** {record['fact_count']}")
+
+    # The point of the sidebar is that memory accumulates, so the growth is
+    # shown as growth. A raw count alone reads as a static fact; "was 4, now 5,
+    # written 2 minutes ago" reads as an event, which is the product.
+    _prev_counts = st.session_state.setdefault("ss_seen_counts", {})
+    _now_count = record.get("signal_count", 0)
+    _was = _prev_counts.get(selected)
+    if _was is not None and _now_count != _was:
+        _direction = "grew" if _now_count > _was else "shrank"
+        st.caption(f"📈 **{_direction} {_was} → {_now_count}** this session")
+    _prev_counts[selected] = _now_count
+
+    st.markdown("---")
+    # A demo that mutates the seeded bank has to be runnable twice. Without
+    # this, the second pass through the hero flow cannot be rehearsed and the
+    # only recovery is a terminal, mid-talk. The backend decides whether this
+    # is even offered: the route only exists when ENABLE_DEMO_RESET=1, so
+    # showing a button that would 404 is worse than showing nothing.
+    _reset_ok = False
+    try:
+        _reset_ok = bool(api("GET", "/health").get("demo_reset_enabled"))
+    except Exception:  # noqa: BLE001
+        # Health is already reported in full below; do not double-report it.
+        _reset_ok = False
+    if _reset_ok:
+        with st.expander("Demo controls"):
+            st.caption(
+                "Logging a signal writes to the shared bank. Resetting deletes every "
+                "competitor's memory — irreversibly — so re-seed afterwards."
+            )
+            st.code("python scripts/seed_data.py --reset --verify", language="bash")
+            # Two clicks, because a single misplaced one destroys ten competitors.
+            if st.checkbox("I understand this deletes all stored memory"):
+                if st.button("🗑 Reset demo data", type="secondary"):
+                    try:
+                        result = api("POST", "/demo/reset", json={})
+                    except Exception as exc:  # noqa: BLE001
+                        st.error(friendly_read_error(exc))
+                    else:
+                        st.session_state.pop("ss_reads", None)
+                        st.session_state.pop("ss_last_signal", None)
+                        st.session_state.pop("ss_last_diff", None)
+                        st.session_state.pop("ss_seen_counts", None)
+                        st.session_state.pop("ss_auto_reread", None)
+                        fetch_competitors.clear()
+                        st.success(
+                            f"Deleted {result['count']} bank(s). Re-seed with "
+                            f"`{result['reseed']}`."
+                        )
+    else:
+        with st.expander("Demo controls"):
+            st.caption(
+                "Reset is disabled on this deployment (`ENABLE_DEMO_RESET=0`). "
+                "To restore the demo data, run this where the API is configured:"
+            )
+            st.code("python scripts/seed_data.py --reset --verify", language="bash")
 
     st.markdown("---")
     with st.expander("System status"):
@@ -289,9 +475,40 @@ else:
 # --- live ingestion -------------------------------------------------------
 with st.expander("➕ Log a new signal (live LLM extraction)", expanded=False):
     st.caption("Paste a headline, pricing snapshot, job post, or messaging excerpt.")
+    # This writes to the shared memory bank, permanently and for every user of
+    # this deployment. It is the least reversible thing in the app, so it says
+    # so here rather than in a README nobody reads mid-demo.
+    st.warning(
+        "Logging a signal **writes to the seeded memory bank** and is visible to everyone "
+        "using this deployment. It cannot be undone from the UI. "
+        "`python scripts/seed_data.py --reset --verify` restores the demo data.",
+        icon="⚠️",
+    )
+
+    # The hero path: one click fills a note that flips Vertex Cloud from a
+    # refusal into a forecast. Hardcoded because a demo that depends on the
+    # demoist pasting the right words at the right moment is not a demo.
+    if selected == "Vertex Cloud":
+        if st.button("🧪 Try the sample", help=(
+            "Fills a pre-written signal that takes Vertex Cloud from 4 to 5 "
+            "signals — the evidence floor — so the read below flips from a "
+            "refusal to a forecast."
+        )):
+            st.session_state["ss_raw_signal"] = SAMPLE_VERTEX_SIGNAL
+        st.caption(
+            "Vertex Cloud is seeded deliberately thin. Its read refuses today; "
+            "the sample signal takes it to the 5-signal floor and it forecasts."
+        )
+    else:
+        st.caption(
+            f"Tip: **{selected}** is seeded with enough signals to forecast. "
+            "For the refusal-to-forecast demo, switch to Vertex Cloud."
+        )
+
     raw = st.text_area(
         "Raw text",
         height=110,
+        key="ss_raw_signal",
         placeholder=(
             "e.g. Nimbus AI opens a Senior Solutions Architect role in the "
             "enterprise segment, the third such posting this quarter."
@@ -299,20 +516,145 @@ with st.expander("➕ Log a new signal (live LLM extraction)", expanded=False):
         label_visibility="collapsed",
     )
     if st.button("Log Signal", type="primary", disabled=not raw.strip()):
+        # Held across the rerun: Streamlit clears the expander's widgets on the
+        # next run, and the diff is the whole point of the click.
         with st.spinner("Extracting structure and writing to Hindsight…"):
             try:
                 new_signal = api(
                     "POST", "/signals", json={"competitor": selected, "raw_text": raw}
                 )
             except Exception as exc:  # noqa: BLE001
-                st.error(f"Ingestion failed: {exc}")
+                st.error(friendly_read_error(exc))
             else:
-                st.success(
-                    f"Stored as **{new_signal['signal_type']}** "
-                    f"dated **{new_signal['date']}** in `{bank_id}`"
-                )
-                st.json(new_signal, expanded=False)
+                st.session_state["ss_last_signal"] = new_signal
+                # Clearing the box stops the same note being logged twice on a
+                # double click, which would silently add two signals.
+                st.session_state["ss_raw_signal"] = ""
                 fetch_competitors.clear()
+                st.rerun()
+
+# --- what the new signal changed -----------------------------------------
+_pending = st.session_state.get("ss_last_signal")
+if _pending and _pending.get("competitor") == selected:
+    st.markdown("---")
+    st.markdown("### 🧠 What your signal changed")
+    st.success(
+        f"Stored as **{_pending['signal_type']}** dated **{_pending['date']}** "
+        f"in `{bank_id}`."
+    )
+    with st.expander("The stored signal", expanded=False):
+        st.json(_pending)
+
+    # The write's receipt comes first and unconditionally. The follow-up read
+    # is a second, separately-failable LLM call, and hiding a successful write
+    # behind its failure would report a loss that did not happen.
+    memory_delta(selected, _pending)
+
+    _before = st.session_state.get("ss_reads", {}).get(selected)
+    _uid = _pending.get("uid", _pending.get("date"))
+    if _before:
+        # Automatic, because the user has already paid for one read in this
+        # session and the diff is the point of logging anything: making them
+        # click again to find out what their own input did is the kind of
+        # friction that hides the mechanism being demonstrated. Cost is the
+        # same call they already made once, and a rate limit is reported
+        # below rather than swallowed.
+        st.caption(
+            "Comparing the read you already generated against a fresh one over the "
+            "same timeline plus your new signal."
+        )
+        # Guarded per signal: the block re-renders on every Streamlit rerun, and
+        # an unguarded call here would re-read the timeline on each interaction
+        # and quietly spend the user's quota.
+        _auto_done = st.session_state.setdefault("ss_auto_reread", [])
+        if _uid not in _auto_done:
+            _auto_done.append(_uid)
+            with st.spinner("Reading the updated timeline…"):
+                try:
+                    _after = api("POST", "/synthesize", json={"competitor": selected})
+                except Exception as exc:  # noqa: BLE001
+                    st.warning(friendly_read_error(exc))
+                else:
+                    if _after.get("rate_limited"):
+                        _wait = _after.get("retry_after_seconds")
+                        st.warning(
+                            "**Groq's rate limit was hit**, so the comparison read "
+                            "did not run"
+                            + (f" — wait about {int(_wait)}s" if _wait else "")
+                            + ". Your signal is stored and the memory counts above are "
+                            "real; only the side-by-side forecast is missing. Generate "
+                            "a read again in a moment to see the diff."
+                        )
+                    else:
+                        st.session_state.setdefault("ss_reads", {})[selected] = _after
+                        # Tagged with the signal that produced it. Without this, a
+                        # second log would show a diff against a read taken before
+                        # the first, quietly attributing two signals' worth of
+                        # change to one click.
+                        st.session_state["ss_last_diff"] = (_before, _after, _uid)
+                        st.rerun()
+    else:
+        # Nothing to diff against, so nothing is run. A hidden LLM call is
+        # worse than an absent one: the user would be billed for a read they
+        # did not ask for, on data they had not finished entering.
+        st.info(
+            "Memory has grown. Generate a read below to see whether the new "
+            "signal changed the answer."
+        )
+        if st.button("🧠 Generate read to see what changed"):
+            with st.spinner("Reading the updated timeline…"):
+                try:
+                    _first = api("POST", "/synthesize", json={"competitor": selected})
+                except Exception as exc:  # noqa: BLE001
+                    st.warning(friendly_read_error(exc))
+                else:
+                    st.session_state.setdefault("ss_reads", {})[selected] = _first
+                    st.rerun()
+
+    _diff = st.session_state.get("ss_last_diff")
+    if _diff and _diff[0] is not None and _diff[2] == _pending.get(
+        "uid", _pending.get("date")
+    ):
+        _b, _a = _diff
+        st.markdown("#### Side by side")
+        _left, _right = st.columns(2)
+        with _left:
+            st.markdown("##### Before")
+            st.caption(f"{_b.get('signal_count', '?')} signals · `{_b.get('model_used', '?')}`")
+            st.markdown(confidence_badge(_b.get("confidence")), unsafe_allow_html=True)
+        with _right:
+            st.markdown("##### After")
+            st.caption(f"{_a.get('signal_count', '?')} signals · `{_a.get('model_used', '?')}`")
+            st.markdown(confidence_badge(_a.get("confidence")), unsafe_allow_html=True)
+
+        _changed = 0
+        for label, key in DIFF_FIELDS:
+            _bv, _av = read_headline(_b, key), read_headline(_a, key)
+            _is_changed = _bv != _av
+            _changed += int(_is_changed)
+            _mark = "🟡 **changed**" if _is_changed else "unchanged"
+            if key == "confidence":
+                # The confidence badge is the headline; a raw string diff of
+                # "medium" -> "high" hides that it moved in the reader's favour.
+                _bv_html = confidence_badge(_b.get("confidence"))
+                _av_html = confidence_badge(_a.get("confidence"))
+                st.markdown(
+                    f"**{label}** — {_mark}\n\n&nbsp;&nbsp;before {_bv_html} "
+                    f"→ after {_av_html}",
+                    unsafe_allow_html=True,
+                )
+                continue
+            st.markdown(
+                f"**{label}** — {_mark}\n\n&nbsp;&nbsp;before: {_bv}\n\n"
+                f"&nbsp;&nbsp;after: **{_av}**" if _is_changed else
+                f"**{label}** — {_mark}\n\n&nbsp;&nbsp;{_bv}",
+            )
+        if _changed:
+            st.success(
+                f"{_changed} of {len(DIFF_FIELDS)} tracked fields changed after one signal."
+            )
+        else:
+            st.info("No tracked field changed. The timeline grew, the read did not.")
 
 
 # --- strategic read -------------------------------------------------------
@@ -336,13 +678,68 @@ else:
             "pricing, feature, hiring, messaging and funding signals."
         )
 
+# --- ask the memory a question --------------------------------------------
+# Deliberately separate from the read above, and labelled as such. This is a
+# question-answering lookup that returns the most similar handful of signals;
+# the strategic read reasons over the complete timeline. Presenting them as
+# two buttons on the same screen without that distinction would invite the
+# reader to treat a k-signal slice as an analysis of the whole history.
+with st.expander("❓ Ask this competitor's memory"):
+    st.caption(
+        "Searches stored signals for a question — *“what did they do about "
+        "pricing?”*. This returns the most relevant handful, **not** the full "
+        "timeline, and it does not generate a forecast. Use **Get Strategic "
+        "Read** above for analysis."
+    )
+    _q = st.text_input(
+        "Question",
+        key="ss_recall_q",
+        placeholder="e.g. pricing changes, hiring, failover",
+        label_visibility="collapsed",
+    )
+    if st.button("🔎 Search memory", disabled=not _q.strip()):
+        with st.spinner("Searching this competitor's memory…"):
+            try:
+                _hit = api("GET", f"/recall/{selected}", params={"q": _q})
+            except Exception as exc:  # noqa: BLE001
+                st.error(friendly_read_error(exc))
+            else:
+                if not _hit.get("signals"):
+                    st.info(
+                        f"Nothing in **{selected}**'s memory matched that. "
+                        "Memory holds "
+                        f"{_hit.get('signal_count', len(signals))} stored signal(s) "
+                        "for this competitor — try a broader term, or log the "
+                        "signal if you have it from elsewhere."
+                    )
+                else:
+                    st.caption(
+                        f"**{_hit['signal_count']} of {len(signals)}** stored "
+                        f"signal(s) matched · `{_hit.get('bank_id')}`"
+                    )
+                    for _s in _hit["signals"]:
+                        # Plain text, never st.markdown on the summary: a stored
+                        # summary is user-supplied content that came back out of
+                        # a search index, and markdown would let it inject links,
+                        # images or headings into this page. st.write escapes.
+                        st.write(
+                            f"`{_s['date']}` · **{_s['signal_type']}** — "
+                            f"{_s['summary']}",
+                            unsafe_allow_html=False,
+                        )
+
     if clicked:
         with st.spinner(f"Reading {len(signals)} months of memory…"):
             try:
                 read = api("POST", "/synthesize", json={"competitor": selected})
             except Exception as exc:  # noqa: BLE001
-                st.error(f"Strategic read failed: {exc}")
+                st.error(friendly_read_error(exc))
             else:
+                # Cached per competitor so that logging a signal can diff
+                # against the read the user already paid for. Keyed by name, not
+                # position, so switching competitors in the sidebar does not
+                # show one company's timeline against another's forecast.
+                st.session_state.setdefault("ss_reads", {})[selected] = read
                 meta_col1, meta_col2 = st.columns([3, 2])
                 # The count appears once, here. timeline_window carries the
                 # date span only — it used to repeat the count, which rendered
@@ -352,10 +749,43 @@ else:
                     f"({read['timeline_window']}) via `{read['model_used']}`"
                 )
                 meta_col2.caption(confidence_badge(read.get("confidence", "none")))
+                # A read built from a window is still a read, but the reader is
+                # entitled to know it is one. The count in the caption above is
+                # what the bank holds; this is what the model was shown, and the
+                # gap between them is the honest way to present a prompt budget
+                # rather than a number that quietly disagrees with itself.
+                if read.get("signals_omitted_from_prompt"):
+                    st.info(
+                        f"**The model saw {read.get('prompt_signal_count', '?')} of "
+                        f"{read['signal_count']} signals** — the first, the most "
+                        f"recent, and every signal in a repeated transition. The "
+                        f"{read['signals_omitted_from_prompt']} others are not in "
+                        f"the prompt"
+                        + (f", and fall between "
+                           f"{read.get('prompt_omitted_span', 'those dates')}."
+                           if read.get("prompt_omitted_span")
+                           else ".")
+                        + " This window is not contiguous, so a pattern that only "
+                        "occurs in the missing stretch would not appear below."
+                    )
                 # The model was asked twice and failed the validators both times.
                 # The read below is the measured facts, not a narrative, and saying
                 # so is the difference between an honest degraded answer and a
                 # broken one. The reason is already in the caption above.
+                # A 429 is answered 200 with the deterministic read, so it never
+                # raises. Checking it here is the difference between "wait 20s"
+                # and "your read was rejected by the validators" — which sends
+                # people hunting a problem they do not have.
+                if read.get("rate_limited"):
+                    _wait = read.get("retry_after_seconds")
+                    st.warning(
+                        f"**Groq's rate limit was hit for this minute**"
+                        + (f" — wait about {int(_wait)}s and read again"
+                           if _wait else " — wait a moment and read again")
+                        + ". Nothing is wrong with your data or your key, and the "
+                        "signals are stored. What follows is the application's own "
+                        "measurement of the timeline, not a forecast."
+                    )
                 if read.get("narrative_withheld"):
                     st.warning(
                         "**Narrative withheld.** The model was asked twice and both "

@@ -120,6 +120,16 @@ So the bank is created with `enable_observations: False`. This app stores discre
 
 Two independent guards keep a derived row off the timeline regardless: the `all_strict` tag scope, and `_unit_to_signal` returning `None` for any unit without `metadata.signal_uid`. `tests/selfcheck.py` pins both, and pins the observation behaviour itself so the double cannot drift back to a fiction.
 
+**6. A prompt is a budget, and going over it is stated rather than hidden.**
+
+Retrieval reads the complete timeline. A single *prompt* cannot, and pretending otherwise is where the two halves of the product would quietly contradict each other: every figure the model is allowed to cite is computed from the signals it can see, so a silently truncated prompt produces a fluent, well-formed analysis of a fragment that reports itself as the whole history.
+
+`MAX_SIGNALS_IN_PROMPT` (default 40, `.env`-configurable) bounds one prompt. Over the cap, the **most recent** signals are kept — recency is the part of the analysis that degrades worst when fed stale history — and the prompt then carries an explicit `EVIDENCE COVERAGE: PARTIAL` line giving both counts, the date the window opens, and the instruction to say so rather than report the visible run as the lot. Under the cap it says `COMPLETE` with the count, so the model is never guessing which it has.
+
+`TimelineFacts.omitted` carries the omission into the validators, and `check_no_partial_claims` blocks a read that calls a window a whole history — "across their entire history", "all 12 signals", "since the beginning" — unless the read also discloses the window. The UI shows the same disclosure to the reader, and `SynthesisResponse` reports `prompt_signal_count`, `signals_omitted_from_prompt` and `prompt_window_opens` so the gap between "what the bank holds" and "what the model saw" is never a number that disagrees with itself.
+
+A cap of `0` raises rather than producing an empty prompt: a misconfiguration should stop the read, not silently analyse nothing. Two mutations guard the pair — keeping the oldest signals instead of the newest, and truncating without declaring it.
+
 ### Why we do not use recall, reflect or observations
 
 Hindsight offers `recall`, `reflect` and observation consolidation, and this app uses none of them as its primary path. That is a decision, not an oversight.
@@ -128,7 +138,37 @@ Hindsight offers `recall`, `reflect` and observation consolidation, and this app
 - **`reflect`** is Hindsight's own synthesis pass. Calling it and then also synthesising would mean two models producing two narratives over the same bank, with no rule for which one wins. Keeping synthesis in `backend/synthesis.py` means the grounding rules, the confidence contract and the validators all apply to a single place, and the read is reproducible: same timeline, same prompt, one output.
 - **Observations** are disabled at bank creation (`enable_observations: False`). Hindsight's consolidation would derive its own summaries of each document, which duplicates work this app already does with typed, dated signals — and it would put undated derived prose on the timeline, which is precisely the material that makes a forecast unfalsifiable. The two guards described above keep derived rows off the timeline even so.
 
-The trade is real and worth naming: "what did Nimbus say about audit logs?" is answered by string-matching the timeline rather than by Hindsight's graph search. Adding `recall` as a *secondary* lookup would be a natural next step — never as the primary timeline source.
+The trade is real and worth naming: "what did Nimbus say about audit logs?" is answered by string-matching the timeline rather than by Hindsight's graph search.
+
+### Asking memory a question: the secondary `recall` path
+
+The reasoning above rules recall *out of synthesis*. It does not rule it out of the product, and refusing to use it at all would be its own kind of dogmatism: "what did they do about audit logs?" is a question, and a question is exactly what relevance-ranked search is for. So recall exists, on its own route, for its own purpose.
+
+- **`GET /recall/{competitor}?q=…`** calls Hindsight's `POST /v1/default/banks/{bank_id}/memories/recall` with `tags=["signal"]` and `tags_match="all_strict"`. The UI puts it behind an *"Ask this competitor's memory"* box, labelled in the box itself as the k most relevant signals rather than the full timeline.
+- **Synthesis never touches it.** `get_timeline()` remains the only retrieval a strategic read is built from. That separation is asserted two ways: the selfcheck runs `import backend.synthesis` and asserts the module exposes no recall symbol, and a mutation points synthesis at `recall_signals` and requires the check to fail.
+- **The tag scope is necessary and not sufficient.** `all_strict` excludes untagged rows, but Hindsight's derived observations *inherit* their source's tags, so an observation passes the tag filter. The load-bearing guard is the same one the timeline uses: a recall result with no `metadata.signal_uid` is dropped.
+- **`RecallResult` has no `date` field** (checked against the published 0.10.1 OpenAPI, not assumed). The date comes from `metadata.signal_date`, then `occurred_start`, then `mentioned_at`. A client that reached for `result["date"]` would raise `KeyError` on every real recall and work perfectly against a mock that invented the field — which is why the double is built from the spec and the selfcheck asserts the field is *absent*.
+- **A miss is not a zero.** Zero-overlap rows are not returned, an unknown bank is a 404 rather than an empty list, and a blank or over-200-character query is a 422. A question that matched nothing and a company with no memory are different answers, and a typo should not read as an absence of evidence.
+
+### Seeing memory change the answer
+
+The point of a persistent-memory agent is that the *answer* moves when the
+memory does, so the UI shows that movement rather than asking you to take it
+on faith. Reads are cached per competitor in the session, and logging a signal
+offers a side-by-side diff of the read you already generated against a fresh
+one: signal count, confidence, evidence staleness, prediction, and
+`missing_evidence`, with changed fields marked.
+
+If you have not generated a read yet, **nothing is run** — you get the memory
+delta and a button instead. A hidden LLM call would bill you for a read you
+did not ask for, on data you had not finished entering. The sidebar also shows
+the count as growth ("4 → 5 this session") rather than a bare number, because
+a static count hides the event that is the whole product.
+
+A rate-limited read is answered `200` with the deterministic read, so the UI
+distinguishes it from a broken key and says *wait*, with the provider's own
+retry hint. Telling someone to check their API key when their key is fine is
+the worse of the two failures.
 
 ---
 
@@ -138,7 +178,7 @@ The trade is real and worth naming: "what did Nimbus say about audit logs?" is a
 python tests/selfcheck.py
 ```
 
-315 checks, no network, no credits. It runs the real application code against `tests/hindsight_double.py` — a double built from the published OpenAPI (`info.version 0.10.1`), not a mock that returns whatever the app happens to want. It enforces the rules a naive mock skips:
+506 checks, no network, no credits. It runs the real application code against `tests/hindsight_double.py` — a double built from the published OpenAPI (`info.version 0.10.1`), not a mock that returns whatever the app happens to want. It enforces the rules a naive mock skips:
 
 - `MemoryItem.metadata` values must be **strings**; a nested object is a 422
 - `MemoryItem.content` is required
@@ -149,7 +189,7 @@ python tests/selfcheck.py
 
 It then exercises the seeded dataset, idempotent re-seeding, timeline ordering, synthesis grounding, thin-competitor refusal, time anchoring and evidence staleness, live ingestion, and each malformed-LLM recovery path.
 
-The last two sections are the ones worth trusting. Section 9 replays five specific defects found by auditing the real 10-competitor run — an unsupported "repeats three times", a silent 26-day gap, a skipped cycle stage, a confident read with no confidence field, a fabricated 30-day cadence — and pins the current behaviour against each. Section 10 then deletes each new rule from the source, in a mutated copy of the module, and asserts the corresponding test **stops firing**: 45 mutations, each of which must break something, so none of those tests can pass for the wrong reason. A check that fails on the real code is a bug; a check that still passes with its own rule deleted is a test that proves nothing.
+The last two sections are the ones worth trusting. Section 9 replays five specific defects found by auditing the real 10-competitor run — an unsupported "repeats three times", a silent 26-day gap, a skipped cycle stage, a confident read with no confidence field, a fabricated 30-day cadence — and pins the current behaviour against each. Section 10 then deletes each new rule from the source, in a mutated copy of the module, and asserts the corresponding test **stops firing**: 51 mutations, each of which must break something, so none of those tests can pass for the wrong reason. A check that fails on the real code is a bug; a check that still passes with its own rule deleted is a test that proves nothing.
 
 Seven of those mutations re-introduce defects found by the *second* audit, verbatim: a refusal allowed to report `high`/`medium`/`low`, the retry notice asking the wrong end of the confidence contract, the permitted-number list dropped from the notice, a withheld narrative not flagged as withheld, the digits-only interval pattern, the indefinite article read as the quantity, and the cadence cue that keeps "within a month" from being read as a measured cadence. Each is pinned to the test that caught it, so the fix cannot be reverted silently.
 
@@ -200,7 +240,7 @@ Seeded, live-verified, and left in a clean state: **71 signals retained across 1
 | `scripts/seed_data.py` | loads the synthetic dataset into Hindsight |
 | `frontend/app.py` | Streamlit UI |
 | `tests/hindsight_double.py` | OpenAPI-faithful Hindsight + Groq contract double |
-| `tests/selfcheck.py` | 315-check offline end-to-end suite, 45 mutations |
+| `tests/selfcheck.py` | 506-check offline end-to-end suite, 51 mutations |
 
 ### API
 
@@ -238,6 +278,8 @@ python scripts/seed_data.py --reset --verify
 
 This writes 71 signals across 10 competitors into Hindsight and reads them back. Re-running without `--reset` is safe *for identical data* — signals are keyed by `document_id`, so unchanged rows are replaced rather than duplicated.
 
+**`--reset` deletes every Signal Stack bank, not only the seeded ones.** It used to iterate the seed file, which meant a bank created by anything else survived a command that printed "reset" and exited 0. That is the worst available combination: memory that looks clean, a clean-looking command, and a synthesis read quietly reasoning over whatever actually survived — a stray probe bank is exactly how it happened here. Banks outside the seed file are now listed by name *before* they are removed, so the operator sees what is being destroyed. If you have real data in a Signal Stack bank, this command will delete it; use `scripts/seed_data.py` without `--reset` to add to it.
+
 **Editing a seeded signal's date orphans the original.** The uid is `slug | date | type | digest`, and that uid *is* the Hindsight `document_id`, so changing a date produces a new document and the old one stays behind. Brightline's bank silently held 13 signals where the file had 7 — and because the orphans were the same announcements a fortnight earlier, the synthesis read them as a genuine "announce, then reinforce a week later" cadence and reported it as a finding. `--verify` now fails the command on any read-back mismatch and names the orphaned rows; `--reset` rebuilds the bank.
 
 ### Run
@@ -251,6 +293,115 @@ streamlit run frontend/app.py
 ```
 
 Open http://localhost:8501. Interactive API docs at http://localhost:8000/docs.
+
+#### Pointing a deployed UI at a deployed API
+
+Locally the UI finds the API on `http://localhost:8000` and needs no
+configuration. When the frontend and the backend are deployed separately, set
+one variable on the **frontend** service:
+
+```bash
+BACKEND_URL=https://signalstack-backend.onrender.com
+```
+
+The UI resolves its API base in this order: `BACKEND_URL`, then
+`SIGNAL_STACK_API` (the original single-image name, still honoured so the
+Docker path is unchanged), then `http://localhost:8000`. The variable is
+documented, empty, in [`.env.example`](.env.example).
+
+Both variables are in `.env.example` and are **optional**: leave them unset
+locally and everything works as before.
+
+#### Locking down writes on a deployed API
+
+Unset, `POST /signals` and `POST /competitors` are unauthenticated. That is
+right locally — one host, no boundary to defend — but **wrong for a public
+deploy**: the backend binds `0.0.0.0`, and those two endpoints write to
+Hindsight using your account key, so an open write endpoint is someone else's
+cloud bill. Set one variable and it is closed:
+
+```bash
+# on BOTH services, the same value
+API_KEY=<any long random string>
+```
+
+Clients then send `X-API-Key: <value>`. The Streamlit UI does this
+automatically from its own `API_KEY`. Reads (`GET /timeline`,
+`POST /synthesize`) stay open either way: the seeded competitor intelligence is
+not private, and gating reads would add friction to the demo for no
+confidentiality gain.
+
+Two caveats worth stating. This is a shared-secret write guard, not real
+authentication — it is sized for a demo deploy, not for user accounts. And
+`POST /signals/explicit` (the seeder's structured write) is deliberately left
+unguarded so `AUTOSEED` and the offline suite keep working; that is the first
+thing to revisit before a real deploy, and it is pinned by a test so the
+decision is visible rather than accidental. The destructive
+`POST /demo/reset` route is behind that key **and** behind its own
+`ENABLE_DEMO_RESET` flag, which is off by default.
+
+#### The demo, start to finish
+
+Two things make the app runnable twice in a row, which matters because logging
+a signal is the one irreversible thing in the UI:
+
+```bash
+python scripts/seed_data.py --reset --verify   # wipe and re-seed the banks
+```
+
+The UI warns that logging writes to the seeded bank. The reset lives behind
+**two independent gates**, because it is the most destructive thing in the app:
+
+| Gate | Default | Effect |
+| --- | --- | --- |
+| `ENABLE_DEMO_RESET=1` | **off** | If unset or `0`, `POST /demo/reset` is not registered and answers **404**. The UI hides its reset button and instead shows the CLI command. |
+| `API_KEY` (when set) | unset | With a key configured, the call must present a matching `X-API-Key` or it is **401**. |
+
+The flag is the primary gate rather than the key because with `API_KEY` unset —
+the local default — the key check is a no-op, so a route guarded only by it is
+effectively unguarded in the default config. `render.yaml` pins
+`ENABLE_DEMO_RESET` to `0`; setting it to `1` is only appropriate for a
+throwaway demo instance. When it does exist it is still behind a confirmation
+checkbox, and it clears every bank and tells you the re-seed command rather
+than re-seeding silently, because that would also overwrite anything a real
+user logged in between. `tests/selfcheck.py` asserts the real HTTP status
+codes for all four combinations (flag off, flag on, right key, wrong key) and
+deletes banks named `competitor-alpha`/`competitor-beta` on a dedicated double
+— names that cannot exist in any real account, so a passing delete is itself
+proof the test never left loopback.
+
+**The hero path is Vertex Cloud.** It is seeded with 4 signals, one short of
+the 5-signal evidence floor, so a read refuses. Click **🧪 Try the sample**,
+log it, and the read flips to a forecast at `medium` — capped, because five
+signals is the minimum and nothing has repeated yet. `tests/selfcheck.py`
+section 5b pins all of it, so the sample cannot quietly stop working if the
+seed or the floor changes.
+
+> **Verified against the offline double, not a live Groq run.** The refusal →
+> forecast flip, the `medium` cap, the sample's date, and the whole API path
+> are pinned in `tests/selfcheck.py` against `tests/hindsight_double.py`, which
+> enforces Hindsight's published contract. That proves the client behaves as
+> specified; it does not prove this Groq account will serve the model. A live
+> hero run has **not** been completed; it is **pending Groq quota**. What
+> actually happened on the last attempt is a 429 rate-limit from Groq, and the
+> cause is **likely quota** on this account rather than anything about the
+> request — availability is per-account and per-plan, so "it 429s" and "the id
+> is wrong" are different problems with different fixes. Run the demo yourself
+> before presenting it, and do not promise the flip until you have seen it.
+>
+> What *is* verified about the model: a read-only `GET /models` against this
+> Groq account lists both `openai/gpt-oss-120b` and `qwen/qwen3.8-27b`, so the
+> configured ids are servable here and the id is not the thing that failed.
+> `llm_client.verify_configured_models()` now runs that same check at startup
+> and warns by name if a configured id is not served — because the symptom
+> otherwise is a confusing extraction error on the first signal rather than a
+> configuration mistake.
+
+`render.yaml` ships two services — `signalstack-backend` (FastAPI, binds
+`0.0.0.0:$PORT`) and `signalstack-frontend` (Streamlit, same start command
+shape). `BACKEND_URL` is deliberately left unset in the blueprint because the
+backend's hostname is not known until that service exists; set it in the
+frontend's environment and redeploy. See [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ---
 

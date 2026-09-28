@@ -6,6 +6,20 @@ fails here rather than in a demo. Every behaviour below is taken from
 https://api.hindsight.vectorize.io/openapi.json (info.version 0.10.1):
 
   BankListResponse         {banks:[BankListItem], total, limit, offset}   (all required)
+  RecallRequest            {query (required in practice; plain str, no
+                             declared minLength), types, prefer_observations,
+                             budget: low|mid|high = mid, max_tokens, trace,
+                             query_timestamp, include, tags, tag_groups,
+                             min_scores, temporal_window,
+                             tags_match: any|all|any_strict|all_strict|exact = any}
+  RecallResponse           {results:[RecallResult] (REQUIRED), trace, entities,
+                             chunks, source_facts, source_facts_truncated}
+  RecallResult             id (REQUIRED), text (REQUIRED), type, entities,
+                             context, occurred_start, occurred_end, mentioned_at,
+                             document_id, metadata (str->str), chunk_id, tags,
+                             source_fact_ids, scores, attachments
+                             -- NOTE: there is NO `date` field on a recall
+                             result. The date is occurred_start/mentioned_at.
   BankListItem             bank_id, name, fact_count, last_document_at, last_write_at
   ListMemoryUnitsResponse  {items:[MemoryUnitListItem], total, limit, offset}
   MemoryUnitListItem       id, text, context, date, fact_type, document_id,
@@ -108,9 +122,32 @@ def _derive_observations(bank_id: str) -> None:
 _TIME_FIELDS = {"created_at", "updated_at", "mentioned_at", "occurred_start", "occurred_end"}
 _TAG_MATCHES = {"any", "all", "any_strict", "all_strict", "exact"}
 
+# The app's evidence floor, so this double refuses exactly when the real
+# validator would reject a forecast. Read from the source of truth with a
+# literal fallback, because the double must stay importable on its own
+# (`python tests/hindsight_double.py`) without the app on the path.
+try:
+    from backend.facts import MIN_SIGNALS_FOR_EVIDENCE as _MIN_SIGNALS_FOR_EVIDENCE
+except ImportError:  # pragma: no cover - standalone invocation
+    _MIN_SIGNALS_FOR_EVIDENCE = 5
+
 
 def _now() -> str:
     return "2026-09-27T12:00:00Z"
+
+
+def _numbered_types(prompt: str, n: int) -> list[str]:
+    """Signal types in timeline order, for the entries the prompt numbers.
+
+    Read alongside the dates rather than assuming a length, so a timeline of
+    any size produces a chain of matching length. Returns [] when the prompt
+    does not number its entries, which the caller treats as "no chain to
+    describe" instead of indexing into an empty list.
+    """
+    rows = re.findall(
+        r"^\d+\.\s+\[(\d{4}-\d{2}-\d{2})\]\s*\(([a-z_]+)\)", prompt, re.M
+    )
+    return [t for _, t in rows][:n]
 
 
 def _seed_noise(bank_id: str) -> None:
@@ -148,8 +185,31 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def _read_json(self):
-        n = int(self.headers.get("Content-Length") or 0)
-        return json.loads(self.rfile.read(n) or b"{}")
+        # Read once, then cache. Every do_* handler drains the body FIRST, before
+        # any routing or early return: on a keep-alive connection an undrained
+        # body leaves the next request line sitting in the socket, so the
+        # following request is parsed as garbage ("Bad request syntax") and the
+        # failure surfaces in a completely unrelated call. Caching keeps the
+        # later call sites working without reading the socket twice.
+        if getattr(self, "_body_cache", None) is None:
+            n = int(self.headers.get("Content-Length") or 0)
+            raw = self.rfile.read(n) if n else b""
+            self._body_cache = json.loads(raw or b"{}")
+        return self._body_cache
+
+    def _drain(self):
+        try:
+            self._read_json()
+        except Exception:
+            self._body_cache = {}
+        return self._body_cache
+
+    def handle_one_request(self):
+        # A handler instance is per CONNECTION, not per request, so without this
+        # reset a body read on one request would be handed to the next request
+        # on the same keep-alive socket.
+        self._body_cache = None
+        super().handle_one_request()
 
     def _authed(self) -> bool:
         return bool(self.headers.get("Authorization"))
@@ -281,6 +341,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # ------------------------------------------------------------------ PUT
     def do_PUT(self):
+        self._drain()
         path = urlparse(self.path).path
         m = re.fullmatch(r"/v1/default/banks/([^/]+)", path)
         if not m:
@@ -318,6 +379,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # --------------------------------------------------------------- DELETE
     def do_DELETE(self):
+        self._drain()
         path = urlparse(self.path).path
         m = re.fullmatch(r"/v1/default/banks/([^/]+)", path)
         if not m:
@@ -332,8 +394,83 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---------------------------------------------------------------- POST
     def do_POST(self):
+        self._drain()
         parsed = urlparse(self.path)
         path, query = parsed.path, parse_qs(parsed.query)
+
+        m = re.fullmatch(r"/v1/default/banks/([^/]+)/memories/recall", path)
+        if m:
+            bank_id = m.group(1)
+            if not self._authed():
+                return self._send(401, {"detail": "Authentication failed: API key required"})
+            if bank_id not in BANKS:
+                return self._send(404, {"detail": "The bank does not exist."})
+            body = self._read_json()
+
+            # Field-for-field from the published OpenAPI (0.10.1):
+            # RecallRequest.query is a plain string with no declared minLength,
+            # so an absent/empty query is a 422 here rather than a 400.
+            query_text = body.get("query")
+            if not isinstance(query_text, str) or not query_text.strip():
+                return self._send(422, {"detail": "query is required"})
+
+            # tags_match defaults to "any", which INCLUDES untagged rows. A
+            # client that filters tags=["signal"] and omits the mode therefore
+            # gets every derived observation in the bank as if it were a
+            # signal. The double reproduces that so the mistake is catchable.
+            mode = body.get("tags_match", "any")
+            if mode not in _TAG_MATCHES:
+                return self._send(422, {"detail": f"invalid tags_match {mode}"})
+            budget = body.get("budget", "mid")
+            if budget not in ("low", "mid", "high"):
+                return self._send(422, {"detail": f"invalid budget {budget}"})
+
+            rows = [u for u in UNITS if u["bank_id"] == bank_id]
+            wanted = [t for t in (body.get("tags") or []) if t]
+            if wanted:
+                rows = [u for u in rows if _match_tags(u.get("tags") or [], wanted, mode)]
+
+            # Deterministic relevance: a plain token-overlap score, newest
+            # tiebreak. Real recall is semantic; what the client must survive
+            # is the SHAPE and the tag scoping, both of which are exact here.
+            terms = {t for t in re.findall(r"[a-z0-9]+", query_text.lower()) if len(t) > 2}
+            def _score(u: dict) -> tuple:
+                hay = f"{u.get('text', '')} {(u.get('metadata') or {}).get('signal_summary', '')}".lower()
+                overlap = sum(1 for t in terms if t in hay)
+                return (-overlap, u.get("mentioned_at") or "")
+
+            # budget controls how much is returned; low is the small set.
+            cap = {"low": 5, "mid": 10, "high": 20}[budget]
+            # A retrieval arm returns matches, not the whole bank. Rows with no
+            # term overlap are not results, so they are dropped here rather
+            # than ranked last -- a client that cannot tell "nothing matched"
+            # from "everything was returned" will happily report an unrelated
+            # signal as the answer to a question it has no bearing on.
+            hits = [u for u in rows if _score(u)[0] < 0]
+            hits.sort(key=_score)
+            hits = hits[:cap]
+
+            # RecallResult, per the spec: id and text required, and NO `date`
+            # field. The date is occurred_start/mentioned_at. A double that
+            # helpfully added `date` would hide the KeyError a real client
+            # would hit, so it deliberately omits it.
+            results = [
+                {
+                    "id": u["id"],
+                    "text": u.get("text", ""),
+                    "type": u.get("fact_type"),
+                    "entities": [u.get("entities")] if u.get("entities") else None,
+                    "context": u.get("context"),
+                    "occurred_start": u.get("occurred_start"),
+                    "mentioned_at": u.get("mentioned_at"),
+                    "document_id": u.get("document_id"),
+                    "metadata": u.get("metadata") or {},
+                    "tags": u.get("tags") or [],
+                    "source_fact_ids": None,
+                }
+                for u in hits
+            ]
+            return self._send(200, {"results": results, "trace": None, "entities": None})
 
         m = re.fullmatch(r"/v1/default/banks/([^/]+)/memories", path)
         if m:
@@ -450,6 +587,7 @@ class Handler(BaseHTTPRequestHandler):
             }
         else:
             m = re.search(r"tracked signals for (.+?):", prompt)
+            _COMPANY = (m.group(1).strip() if m else "This competitor")
             # Count the NUMBERED timeline entries, not every bracketed date.
             # The FACTS block repeats the last three signals in the same
             # [date] (type) shape as the timeline, so counting brackets would
@@ -491,12 +629,21 @@ class Handler(BaseHTTPRequestHandler):
             single_m = re.search(r"seen only ONCE[^:]*: (.+)", facts_text)
             singles = single_m.group(1) if single_m else ""
 
-            if n < 6:
+            # The refusal threshold is the application's own evidence floor, not
+            # a number invented here. It used to be a hardcoded `n < 6`, one
+            # signal stricter than backend.facts.MIN_SIGNALS_FOR_EVIDENCE (5),
+            # and that quietly made the UI's headline demo impossible to verify:
+            # the app would permit a forecast at 5 signals while the double still
+            # refused, so the refusal->forecast flip never happened in the suite.
+            # A fake that is stricter than the real thing tests the wrong
+            # behaviour, so the constant is imported rather than restated.
+            if n < _MIN_SIGNALS_FOR_EVIDENCE:
                 # A refusal: calibrated by construction, and exempt from the
                 # interval/quote checks because it asserts no pattern.
                 missing = (
-                    f"At least {6 - n} more signal(s) spanning a second occurrence of any "
-                    "signal-type transition would show whether an ordering exists at all."
+                    f"At least {_MIN_SIGNALS_FOR_EVIDENCE - n} more signal(s) spanning a "
+                    "second occurrence of any signal-type transition would show whether "
+                    "an ordering exists at all."
                 )
                 payload = {
                     "patterns": (
@@ -561,36 +708,99 @@ class Handler(BaseHTTPRequestHandler):
                     "No signal-type transition in the FACTS block occurs more than once, so this "
                     "is one observed instance rather than a repeating cycle."
                 )
+                # The forecast branch used to narrate Nimbus's actual story with
+                # hardcoded positions -- `dates[5]` for the price cut -- so it
+                # raised IndexError on any timeline shorter than six signals. For
+                # Vertex that meant the UI's headline demo could not be verified
+                # at all: the double 500'd, the client saw a disconnect, and the
+                # read silently degraded to the fallback. The chain is now read
+                # off the timeline in front of us, so a 5-signal competitor gets
+                # a real forecast instead of a crash, and Nimbus still gets the
+                # enterprise land-grab story because the types genuinely are
+                # funding, hiring, pricing, messaging.
+                _types = _numbered_types(prompt, n)
+                _first = _types[0] if _types else ""
+                _last = _types[-1] if _types else ""
+                _chain = ", then ".join(
+                    f"{t} on {d}" for t, d in zip(_types, dates)
+                ) or f"{n} signals between {dates[0]} and {dates[-1]}"
+                # A funded-then-repriced-then-enterprise sequence is the story
+                # the audit read for Nimbus; a timeline without those types
+                # gets a plainer one rather than a borrowed claim.
+                _enterprise = (
+                    _first == "funding" and "pricing" in _types
+                    and ("messaging" in _types or "feature" in _types)
+                )
+                if _enterprise:
+                    # The real summary, quoted from the timeline the prompt
+                    # handed over, so the audit's founding read ("Series C, then
+                    # an enterprise land-grab") is still what the double says.
+                    # Naming the type alone ("funding, then pricing") lost the
+                    # actual claim and failed the grounding check.
+                    _opening = (
+                        f"a Series C on {dates[0]}, a GTM hiring cluster immediately after, "
+                        f"a Pro price cut on {dates[_types.index('pricing')] if 'pricing' in _types else dates[0]}, "
+                        "then a homepage rewrite to 'enterprise-ready' messaging, then SSO/SCIM "
+                        "at GA, then a second pricing move that restricted volume discounts to "
+                        "enterprise contracts."
+                    )
+                    _chain = ""
+                    _intent = (
+                        f"{_COMPANY} is converting newly funded go-to-market capacity into an "
+                        "enterprise land-grab: cheapen entry to drive volume, then move the "
+                        "margin and the conversation onto procurement-led deals."
+                    )
+                    _falsifier = (
+                        "Falsified if the self-serve tier stays the primary conversion path or "
+                        "volume hiring does not resume."
+                    )
+                else:
+                    _opening = ""
+                    _intent = (
+                        f"The {n} signals run {_chain}. Each step follows the last without "
+                        "reversing direction, which reads as one deliberate sequence rather than "
+                        "unrelated maintenance."
+                    )
+                    _falsifier = (
+                        "Falsified if the next signal reverses that direction or arrives on an "
+                        "unrelated theme."
+                    )
                 payload = {
                     "patterns": (
-                        f"{n} signals between {dates[0]} and {dates[-1]} form an ordered chain: a "
-                        f"Series C on {dates[0]}, a GTM hiring cluster immediately after, a 35% Pro "
-                        f"price cut on {dates[5]}, then a homepage rewrite to 'enterprise-ready' "
-                        "messaging, then SSO/SCIM at GA, then a second pricing move that restricted "
-                        f"volume discounts to enterprise contracts. {cadence_sentence} "
-                        f"{repeat_sentence}"
+                        f"{n} signals between {dates[0]} and {dates[-1]} form an "
+                        f"ordered chain: {_opening} {_chain}. "
+                        f"{cadence_sentence} {repeat_sentence}"
                     ),
-                    "inferred_intent": (
-                        "Nimbus is converting funded go-to-market capacity into an enterprise "
-                        "land-grab: cheapen entry to drive volume, then move the margin and the "
-                        "conversation onto procurement-led deals."
-                    ),
+                    "inferred_intent": _intent,
                     "predicted_next_move": (
                         f"Counting from today ({today}), " + stale_clause + forecast +
-                        "Falsified if the self-serve $32 tier stays the primary conversion path "
-                        "or volume hiring does not resume."
+                        _falsifier
                     ),
                     "recommendation": (
-                        "Re-check Nimbus's changelog and open roles this week to confirm the "
-                        "cadence has resumed, and in parallel ship SSO and audit logs in your own "
-                        "product plus an enterprise-tier SKU, so a pre-emptive offer is ready "
-                        "rather than late."
+                        f"Re-check {_COMPANY}'s changelog and open roles this week to confirm "
+                        "the cadence has resumed, and in parallel prepare a matching response so "
+                        "a pre-emptive offer is ready rather than late."
                     ),
                     "confidence": confidence,
+                    # The validator requires that when no transition repeats,
+                    # missing_evidence says so -- and it checks that, rather
+                    # than trusting a fluent-sounding answer. The double used
+                    # to write a timing-shaped missing_evidence regardless, so
+                    # any forecast over a no-repeat timeline was rejected and
+                    # the UI's demo read came back as the deterministic stub.
                     "missing_evidence": (
-                        f"A further {median}-day interval with no signal would confirm the stream "
-                        f"has gone quiet rather than merely irregular; any dated announcement after "
-                        f"{dates[-1]} would do the same."
+                        (
+                            "Nothing has repeated yet: a second instance of any "
+                            "signal-type transition would be the first repeat, and "
+                            f"a further {median}-day interval with no signal would "
+                            "confirm the stream has gone quiet rather than merely "
+                            f"irregular. Any dated announcement after {dates[-1]} "
+                            "would also narrow the timing."
+                        )
+                        if not repeats else
+                        f"A further {median}-day interval with no signal would confirm the "
+                        f"stream has gone quiet rather than merely irregular; any dated "
+                        f"announcement after {dates[-1]} would do the same."
                     ),
                 }
 
@@ -601,7 +811,11 @@ class Handler(BaseHTTPRequestHandler):
 
 def serve(port: int | None = None) -> ThreadingHTTPServer:
     ThreadingHTTPServer.allow_reuse_address = True
-    port = port or int(os.getenv("FAKE_PORT", "8899"))
+    # `port or ...` would treat an explicit 0 as "unset" and hand back the
+    # default port, which is already taken when a second double is wanted. 0
+    # means "any free port", so the check has to be for None.
+    if port is None:
+        port = int(os.getenv("FAKE_PORT", "8899"))
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     return httpd
 

@@ -30,6 +30,7 @@ if str(REPO_ROOT) not in sys.path:
 from backend import hindsight_client
 from backend.ingestion import load_seed_file  # noqa: E402
 from backend.config import (  # noqa: E402
+    BANK_PREFIX,
     SEED_FILE,
     hindsight_configured,
     missing_config_report,
@@ -53,8 +54,44 @@ def load_signals(path: Path) -> dict[str, list[Signal]]:
 
 
 def cmd_reset(grouped: dict[str, list[Signal]]) -> None:
-    for name in grouped:
-        deleted = hindsight_client.client.delete_bank(name)
+    """Delete every Signal Stack bank, then let the seeder rebuild the seeded set.
+
+    The set to delete is every bank on the account, not just the ones named in
+    the seed file. An earlier version iterated the seed file, which meant a
+    bank created by anything else -- a stray API call, a competitor someone
+    added by hand -- survived a command that printed "reset" and reported
+    success. That is the worst combination available: memory that looks clean,
+    a clean-looking command, and a synthesis read quietly reasoning over
+    whatever actually survived.
+
+    Banks outside the seed file are listed separately before they are removed,
+    so the operator sees exactly what extra data is about to be destroyed
+    instead of discovering it afterwards.
+    """
+    try:
+        existing = [
+            bank["bank_id"]
+            for bank in hindsight_client.client.list_banks()
+            if (bank.get("bank_id") or "").startswith(f"{BANK_PREFIX}-")
+        ]
+    except hindsight_client.HindsightError as exc:
+        print(f"  {YELLOW}failed{RESET}: could not list banks: {exc}")
+        raise SystemExit(1) from exc
+
+    seeded = {hindsight_client.bank_id_for(name) for name in grouped}
+    extra = [b for b in existing if b not in seeded]
+    if extra:
+        print(f"  {YELLOW}not in the seed file, deleting anyway{RESET} ({len(extra)}):")
+        for bank_id in sorted(extra):
+            print(f"    - {bank_id}")
+
+    for bank_id in sorted(existing):
+        name = bank_id.removeprefix(f"{BANK_PREFIX}-")
+        try:
+            deleted = hindsight_client.client.delete_bank(name)
+        except hindsight_client.HindsightError as exc:
+            print(f"  {YELLOW}failed{RESET} {name}: {exc}")
+            continue
         status = "deleted" if deleted else "not present"
         print(f"  {CYAN}reset{RESET} {name}: {status}")
 

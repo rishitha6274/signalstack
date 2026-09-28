@@ -127,6 +127,21 @@ class TimelineFacts:
     # "inventing a deadline that has already passed". Without this the two are
     # indistinguishable and the honest answer gets rejected.
     signal_dates: tuple[str, ...] = ()
+    # How many signals exist in the bank but were left out of THIS prompt. Zero
+    # means the model saw the complete timeline. Non-zero is the one case where
+    # a fluent, confident, well-formed answer is still wrong as stated, so it
+    # travels with the facts rather than living in a log line.
+    omitted: int = 0
+    # The dates the omitted signals span. The window keeps the first signal and
+    # the most recent ones, so what is missing sits in the MIDDLE of the
+    # history and a single "before X" date would describe a shape that no longer
+    # exists.
+    omitted_span: str = ""
+    # How many signals were actually rendered into the prompt. Equals n when
+    # nothing was omitted, and is deliberately separate from n: n is the true
+    # length of the timeline, and every cadence figure below is measured over
+    # all of it.
+    shown: int = 0
 
     # -- the licence: numbers the response may state -----------------------
     def allowed_numbers(self) -> set[int]:
@@ -383,7 +398,18 @@ class TimelineFacts:
 
 
 def build_facts(signals: Sequence[Signal], today: date | None = None,
-                staleness: str | None = None) -> TimelineFacts:
+                staleness: str | None = None, *, omitted: int = 0,
+                omitted_span: str = "", window: Sequence[Signal] | None = None
+                ) -> TimelineFacts:
+    """Measure the timeline, and describe the window the model was given.
+
+    Every cadence figure -- intervals, median, transition counts, staleness --
+    is computed over ALL the signals, not over the prompt window. A window is
+    not a smaller history, it is a subset of one, and measuring cadence across a
+    gap the selection itself created would invent a silence the company never
+    had. `window` only says what was rendered, so the coverage line and the
+    response can report it.
+    """
     """Compute every figure the prompt is allowed to assert."""
     today = today or date.today()
     sigs = sorted(signals, key=lambda s: s.date)
@@ -414,7 +440,10 @@ def build_facts(signals: Sequence[Signal], today: date | None = None,
         days_overdue=days_overdue(age, median),
         as_of=as_of,
         staleness=staleness,
-        last_three=list(sigs[-3:]),
+        last_three=list((list(window) if window is not None else sigs)[-3:]),
         transitions=transition_counts(sigs),
         signal_dates=tuple(s.date for s in sigs),
+        omitted=omitted,
+        omitted_span=omitted_span,
+        shown=len(window) if window is not None else len(sigs),
     )

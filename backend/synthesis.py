@@ -22,8 +22,9 @@ from dataclasses import dataclass
 from datetime import date
 
 from . import hindsight_client, validators
+from .config import MAX_SIGNALS_IN_PROMPT
 from .facts import build_facts, days_overdue
-from .llm_client import LLMError, client as llm_client
+from .llm_client import LLMError, RateLimitError, client as llm_client
 from .models import Confidence, Signal, SynthesisResponse
 from .validators import validate_response
 
@@ -146,6 +147,102 @@ REFUSING:
 
 Output raw JSON only. No preamble, no markdown fences, no commentary outside the
 JSON object."""
+
+
+def _window_indices(ordered: list[Signal], cap: int) -> set[int]:
+    """Which positions of a date-sorted timeline belong in the prompt.
+
+    Split out from `fit_prompt_window` so the selection has exactly one
+    implementation. The omitted count and the omitted span have to describe the
+    same set of signals; deriving them separately by matching objects or strings
+    is how the prompt ends up saying "12 of 71" and "nothing before March" when
+    it actually dropped two signals from the middle.
+    """
+    if len(ordered) <= cap:
+        return set(range(len(ordered)))
+
+    keep = {0, *range(len(ordered) - cap, len(ordered))}
+
+    # A transition is a consecutive pair in the FULL timeline. Counting repeats
+    # on the already-trimmed window would be circular: trimming is what decides
+    # which pairs are consecutive.
+    counts: dict[tuple[str, str], int] = {}
+    for earlier, later in zip(ordered, ordered[1:]):
+        key = (earlier.signal_type, later.signal_type)
+        counts[key] = counts.get(key, 0) + 1
+    for index, (earlier, later) in enumerate(zip(ordered, ordered[1:])):
+        if counts[(earlier.signal_type, later.signal_type)] >= 2:
+            keep.add(index)
+            keep.add(index + 1)
+    return keep
+
+
+def fit_prompt_window(
+    signals: list[Signal], limit: int | None = None
+) -> tuple[list[Signal], int]:
+    """The signals one prompt may carry, and how many were left out.
+
+    A plain "most recent N" is the obvious rule and the wrong one. It throws
+    away the *first* signal, which is where a strategy's origin is, and it can
+    slice a repeat in half: a pricing->hiring transition that occurred twice,
+    once in March and once last week, looks like it happened once. The whole
+    point of a persistent timeline is the chain, so the window keeps three
+    things and nothing else:
+
+      1. the FIRST signal -- where the strategy started;
+      2. the most recent `limit` signals -- where it is now;
+      3. every signal in a REPEATED transition -- the evidence that licenses
+         the word "repeats", which is the strongest claim the app makes and
+         the easiest one to accidentally make unsupported.
+
+    The result is deliberately not contiguous, and `limit` is therefore a floor
+    for recency rather than a hard ceiling: a timeline that is one repeating
+    cycle from start to finish keeps every signal, because dropping any of them
+    would turn an observed repeat into an apparent one-off. That is the correct
+    trade -- an over-long prompt over an understated timeline -- but it is a
+    real bound the caller should know about, so the window reports its own size
+    and the caller discloses it.
+
+    That non-contiguity is also why the cadence figures are measured on the full
+    timeline rather than on this window, and why the disclosure describes the
+    omitted signals as a span in the middle of the history rather than as a tail
+    before some date.
+
+    Returns the dropped count alongside the window rather than hiding it. The
+    caller has to write that count into the prompt, because a model told "12
+    signals" when the bank holds 71 produces a confident, well-formed analysis
+    of twelve signals and reports it as the lot. See `build_prompt`, which turns
+    the count into an explicit EVIDENCE COVERAGE line, and
+    `validators.check_no_partial_claims`, which blocks the model from describing
+    the window as the whole.
+    """
+    cap = MAX_SIGNALS_IN_PROMPT if limit is None else limit
+    if cap <= 0:
+        # A zero or negative cap is a configuration mistake, not an instruction
+        # to send an empty prompt. Refusing is better than analysing nothing.
+        raise ValueError(f"MAX_SIGNALS_IN_PROMPT must be positive, got {cap}")
+    ordered = sorted(signals, key=lambda s: s.date)
+    keep = _window_indices(ordered, cap)
+    window = [ordered[i] for i in sorted(keep)]
+    return window, len(ordered) - len(window)
+
+
+def omitted_span(signals: list[Signal], window: list[Signal]) -> str:
+    """The date range the omitted signals cover, or "" if nothing is omitted.
+
+    The window keeps the first signal and the most recent ones, so what is left
+    out sits in the middle. "Nothing before 2026-05-01" would be false; the
+    honest description is the span the gaps actually cover.
+    """
+    cap = max(MAX_SIGNALS_IN_PROMPT, len(window))
+    ordered = sorted(signals, key=lambda s: s.date)
+    keep = _window_indices(ordered, cap)
+    missing = sorted(ordered[i].date for i in range(len(ordered)) if i not in keep)
+    if not missing:
+        return ""
+    if len(missing) == 1:
+        return missing[0]
+    return f"{missing[0]} to {missing[-1]}"
 
 
 def format_timeline(signals: list[Signal]) -> str:
@@ -271,15 +368,41 @@ def evidence_clock(signals: list[Signal], today: date | None = None) -> Evidence
 def build_prompt(
     competitor: str, signals: list[Signal], today: date | None = None
 ) -> str:
+    window, omitted = fit_prompt_window(signals)
+    # Cadence is measured on the full timeline: a window is a subset of the
+    # history, not a shorter history, and measuring across a gap the selection
+    # created would invent a silence that never happened.
     clock = evidence_clock(signals, today=today)
-    facts = build_facts(signals, today=clock.today, staleness=clock.staleness)
+    span = omitted_span(signals, window)
+    facts = build_facts(signals, today=clock.today, staleness=clock.staleness,
+                        omitted=omitted, omitted_span=span, window=window)
+    coverage = (
+        f"- EVIDENCE COVERAGE: COMPLETE. All {len(signals)} signals in this "
+        f"bank are shown below.\n"
+        if not omitted
+        else (
+            f"- EVIDENCE COVERAGE: PARTIAL. {len(window)} of {len(signals)} "
+            f"signals are shown, chosen as the first signal, the {MAX_SIGNALS_IN_PROMPT} "
+            f"most recent, and every signal in a repeated transition. The other "
+            f"{omitted} are NOT shown"
+            + (f" (they fall between {span})" if span else "")
+            + ". A pattern that appears only in the missing stretch would be "
+            "invisible to you, and a gap between two listed signals does not "
+            "mean nothing happened. Say which stretch you cannot see rather "
+            "than reporting the visible run as the whole history.\n"
+        )
+    )
     return SYNTHESIS_PROMPT.format(
         competitor=competitor,
-        numbered_timeline=format_timeline(signals),
+        numbered_timeline=format_timeline(window),
         today=clock.today.isoformat(),
         age_sentence=clock.age_sentence,
-        facts_block=facts.render() + facts.overdue_instruction(),
+        facts_block=coverage + facts.render() + facts.overdue_instruction(),
     ) + GROUNDING_RULES
+
+
+def _first_date(signals: list[Signal]) -> str:
+    return signals[0].date if signals else "(none)"
 
 
 def _coerce_confidence(value: object) -> Confidence:
@@ -513,11 +636,18 @@ def _fallback_response(
     signals: list[Signal],
     reason: str,
     clock: EvidenceClock | None = None,
+    rate_limited: bool = False,
+    retry_after_seconds: float | None = None,
 ) -> SynthesisResponse:
     """Deterministic read used when the LLM is unavailable.
 
     Still a real answer: it reports the chronological span, the per-type
     counts, and says plainly that the narrative could not be generated.
+
+    A rate limit is called out separately from a broken provider because the
+    advice differs completely: one is "come back in 20 seconds", the other is
+    "check GROQ_API_KEY". Folding them into one message sends people to debug
+    a key that is working fine.
     """
     clock = clock or evidence_clock(signals)
     counts: dict[str, int] = {}
@@ -536,7 +666,13 @@ def _fallback_response(
             "Not predicted. Re-run the strategic read once the LLM is reachable; "
             "the stored memory is intact."
         ),
-        recommendation="Check GROQ_API_KEY / Groq availability, then re-run the read.",
+        recommendation=(
+            "The LLM rate limit was reached for this minute. Wait for the "
+            "cooldown below and re-run the read — the stored signals are "
+            "unaffected and no key needs changing."
+            if rate_limited
+            else "Check GROQ_API_KEY / Groq availability, then re-run the read."
+        ),
         confidence=Confidence.none,
         missing_evidence=(
             "A reachable LLM would let the timeline be read; the stored signals "
@@ -549,6 +685,8 @@ def _fallback_response(
         evidence_age_days=clock.age_days,
         evidence_staleness=clock.staleness,
         days_overdue=days_overdue(clock.age_days, clock.cadence_days),
+        rate_limited=rate_limited,
+        retry_after_seconds=retry_after_seconds,
     )
 
 
@@ -582,9 +720,19 @@ def generate_strategic_read(
             days_overdue=0,
         )
 
-    facts = build_facts(signals, today=clock.today, staleness=clock.staleness)
+    # The same window the prompt is built from, so the validators and the
+    # prompt agree about what was shown. The FACTS figures stay full-timeline on
+    # purpose: they are measurements the application makes and discloses, and
+    # the model is told not to recompute them, so a median interval derived from
+    # a signal it did not see is a fact the prompt showed it -- not a guess.
+    # What it may not do is *quote* the hidden stretch, and that is enforced
+    # below by restricting the quote check to the rendered window.
+    window, omitted = fit_prompt_window(signals)
+    facts = build_facts(signals, today=clock.today, staleness=clock.staleness,
+                        omitted=omitted, omitted_span=omitted_span(signals, window),
+                        window=window)
     timeline_text = " ".join(
-        f"{signal.date} {signal.signal_type} {signal.summary}" for signal in signals
+        f"{signal.date} {signal.signal_type} {signal.summary}" for signal in window
     )
     prompt = build_prompt(competitor, signals, today=today)
 
@@ -599,6 +747,18 @@ def generate_strategic_read(
     for attempt in range(2):
         try:
             parsed, model_used = llm_client.call_llm_json(prompt)
+        except RateLimitError as exc:
+            # Caught before its parent: this is the one failure where "retry
+            # immediately" is guaranteed to fail again, and the only one with a
+            # concrete wait to hand the user.
+            log.warning(
+                "synthesis rate limited for %s, retry_after=%.0fs",
+                competitor, exc.retry_after or 0.0,
+            )
+            return _fallback_response(
+                competitor, signals, str(exc), clock,
+                rate_limited=True, retry_after_seconds=exc.retry_after,
+            )
         except LLMError as exc:
             log.warning("synthesis LLM call failed for %s: %s", competitor, exc)
             return _fallback_response(competitor, signals, str(exc), clock)
@@ -641,6 +801,9 @@ def generate_strategic_read(
         confidence=_coerce_confidence(parsed.get("confidence")),
         missing_evidence=field("missing_evidence"),
         signal_count=len(signals),
+        prompt_signal_count=facts.n,
+        signals_omitted_from_prompt=facts.omitted,
+        prompt_omitted_span=facts.omitted_span,
         timeline_window=timeline_window(signals),
         model_used=model_used,
         data_as_of=clock.as_of,

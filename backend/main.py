@@ -55,9 +55,60 @@ def bootstrap() -> None:
     problems = missing_config_report()
     if problems:
         log.warning("Configuration incomplete:\n  - " + "\n  - ".join(problems))
+
+    # Deliberate but worth saying out loud. The destructive route is gated on
+    # two independent switches, and this is the combination where only one of
+    # them is doing any work: the route exists, and nothing is checking who is
+    # asking. Locally that is fine -- one machine, one operator, loopback. On
+    # a shared or public instance it means anyone who can reach the API can
+    # delete every bank. Warned before the early return so it still appears
+    # when the rest of the config is also incomplete.
+    from .config import API_KEY, ENABLE_DEMO_RESET
+
+    if ENABLE_DEMO_RESET and not API_KEY:
+        log.warning(
+            "ENABLE_DEMO_RESET=1 with no API_KEY: POST /demo/reset is live and "
+            "UNAUTHENTICATED. Anyone who can reach this API can delete every "
+            "competitor's memory. Acceptable for a local demo on loopback; set "
+            "API_KEY, or ENABLE_DEMO_RESET=0, before exposing this service."
+        )
+    elif ENABLE_DEMO_RESET:
+        log.warning(
+            "ENABLE_DEMO_RESET=1: POST /demo/reset is live and deletes every bank "
+            "for anyone holding the write key. Confirm this instance is a "
+            "throwaway demo before handing out that key."
+        )
+
+    if problems:
         return
 
     log.info("Signal Stack API ready.")
+
+    # Model ids are per-account and per-plan: an id that is correct on one
+    # Groq plan 400s on another, and the symptom is a confusing extraction
+    # failure on the first signal rather than a configuration error. One
+    # read-only GET /models at boot turns that into a log line the operator can
+    # act on. It is placed after the config report so it is skipped when there
+    # is no key to probe with, and it cannot raise -- a network failure here is
+    # reported, not raised, so a transient outage cannot stop the service
+    # serving reads.
+    from .config import GROQ_API_KEY
+    from .llm_client import verify_configured_models
+
+    if GROQ_API_KEY:
+        try:
+            model_problems = verify_configured_models()
+        except Exception as exc:  # never let a probe stop the service booting
+            log.info("Could not verify the configured Groq models: %s", exc)
+        else:
+            for problem in model_problems:
+                # "Could not verify" and "this model is not served" share a
+                # level here, deliberately: at boot an unverified model is
+                # indistinguishable from an unusable one until something tries
+                # it, and the fix for both is in the message.
+                log.warning("Model check: %s", problem)
+            if not model_problems:
+                log.info("Model check: configured Groq models are servable.")
 
     from .config import AUTOSEED, BANK_PREFIX
     from . import hindsight_client

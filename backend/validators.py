@@ -385,6 +385,73 @@ def check_no_repeat_disclosure(response: dict, facts: TimelineFacts) -> list[str
     ]
 
 
+_COMPLETENESS_CLAIM = re.compile(
+    r"\b(?:complete|comprehensive|entire|full|whole)\s+"
+    r"(?:\w+\s+){0,2}?(?:history|timeline|record|picture|story)\b"
+    r"|\ball\s+(?:\d+\s+)?(?:signals?|events?|data points?)\b"
+    r"|\bevery\s+(?:signal|event|move|quarter|month)\b"
+    r"|\bsince\s+(?:the\s+)?(?:beginning|start|launch|inception)\b"
+    r"|\bthroughout\s+(?:their|the)\s+(?:history|timeline)\b"
+    r"|\bno\s+earlier\b|\bnothing\s+before\b"
+    r"|\bconsistent(?:ly)?\s+since\b",
+    re.I,
+)
+
+_PARTIAL_DISCLOSURE = re.compile(
+    r"\b(?:most\s+recent|latest|only|last|past)\s+\d+\b"
+    r"|\b(?:omitted|excluded|dropped|not\s+shown|outside)\b"
+    r"|\bpartial(?:ly)?\b|\brecent(?:\s+\w+){0,2}\s+only\b"
+    r"|\bbefore\s+\d{4}-\d{2}-\d{2}\b|\bprior\s+to\b|\bearlier\s+(?:signals?|history)\b"
+    r"|\bwindow\b|\bsince\s+\d{4}-\d{2}-\d{2}\b"
+    r"|\blast\s+\d+\s+(?:signals?|months?)\b"
+    r"|\b\d+\s+of\s+\d+\b",
+    re.I,
+)
+
+
+def check_no_partial_claims(response: dict, facts: TimelineFacts) -> list[str]:
+    """A read built from a window may not describe the window as everything.
+
+    When a bank holds more signals than one prompt can carry, the oldest are
+    left out and the prompt says so. The model may still write "across their
+    entire history" or "all 12 signals", because that is the shape a confident
+    analysis takes, and the sentence is not false in isolation -- it is only
+    false here, against evidence that is knowingly incomplete.
+
+    Nothing else in the suite catches this. The interval, quote and confidence
+    checks all compare the response to the facts it was given, and the facts are
+    internally consistent; they just describe a window. So the omission is
+    checked here, against the response's own completeness language, and
+    satisfied only by an explicit disclosure.
+    """
+    if not facts.omitted:
+        return []
+    narrative = " ".join(
+        str(response.get(key) or "")
+        for key in ("patterns", "inferred_intent", "predicted_next_move",
+                    "recommendation")
+    )
+    claim = _COMPLETENESS_CLAIM.search(narrative)
+    if not claim:
+        return []
+    if _PARTIAL_DISCLOSURE.search(narrative) or _PARTIAL_DISCLOSURE.search(
+        str(response.get("missing_evidence") or "")
+    ):
+        return []
+    where = f" (the missing {facts.omitted} fall between {facts.omitted_span})" \
+        if facts.omitted_span else ""
+    return [
+        f"this read was built from {facts.shown} of {facts.n} signals — the first, "
+        f"the most recent, and every signal in a repeated transition{where}. The "
+        f"window is not the whole history and is not contiguous, so the read must "
+        f"not describe the evidence as complete. It claimed {claim.group(0)!r} "
+        f"without saying some signals were not shown — either drop the "
+        f"completeness language or disclose the window, e.g. \"across the "
+        f"{facts.shown} signals shown, excluding {facts.omitted} between "
+        f"{facts.omitted_span}\""
+    ]
+
+
 def check_overdue_acknowledged(
     response: dict, facts: TimelineFacts, prediction: str
 ) -> list[str]:
@@ -595,4 +662,5 @@ def validate_response(
                                          prediction, evidence=timeline_text))
     problems.extend(check_quotes_verbatim(response, facts, timeline_text))
     problems.extend(check_predicted_date_future(response, facts, prediction))
+    problems.extend(check_no_partial_claims(response, facts))
     return problems

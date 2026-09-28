@@ -219,6 +219,15 @@ class SynthesisResponse(BaseModel):
     narrative_withheld: bool = False
     # Provenance: what the read was built from, so the UI can be honest about it.
     signal_count: int = 0
+    # A prompt is a budget. When a bank holds more signals than one prompt may
+    # carry, the read is still valid but it is a read of a window -- so the count
+    # shown to the model, the count omitted, and the date the window opens are
+    # all reported rather than left in a log line the reader never sees.
+    prompt_signal_count: int = 0
+    signals_omitted_from_prompt: int = 0
+    # The date range the omitted signals cover. Not a "before" date: the window
+    # keeps the first signal, so what is missing sits in the middle of history.
+    prompt_omitted_span: str = ""
     timeline_window: str = ""
     model_used: str = ""
     # Evidence freshness. A read built from a timeline whose last signal predates
@@ -231,6 +240,14 @@ class SynthesisResponse(BaseModel):
     # evidence_age_days: 40 days is unremarkable for a quarterly competitor and
     # overdue for a weekly one.
     days_overdue: int = 0
+    # Rate limiting. A 429 is caught server-side and answered with a normal 200
+    # carrying the deterministic read, so the HTTP status cannot tell the UI
+    # what happened. These two fields are how the UI says "wait 20s" instead of
+    # "check your API key" — a temporarily exhausted per-minute budget looks
+    # nothing like a broken key, and telling someone to fix a key that is fine
+    # is the worse of the two failures.
+    rate_limited: bool = False
+    retry_after_seconds: Optional[float] = None
 
 
 # --------------------------------------------------------------------------
@@ -241,6 +258,10 @@ class HealthResponse(BaseModel):
     hindsight_configured: bool
     groq_configured: bool
     problems: list[str] = []
+    # Whether the destructive demo reset exists on this deployment. The UI
+    # reads it to decide whether to show the reset control at all, so the
+    # capability is discoverable only where it is actually available.
+    demo_reset_enabled: bool = False
 
 
 class TimelineResponse(BaseModel):
@@ -248,4 +269,20 @@ class TimelineResponse(BaseModel):
     bank_id: str
     signal_count: int
     retrieval: str = "chronological-complete"
+    signals: list[Signal]
+
+
+class RecallResponse(BaseModel):
+    """The answer to one question about one competitor's memory.
+
+    `retrieval` is carried in the payload rather than implied by the shape, so
+    a client that has both response types cannot confuse a semantic subset for
+    the complete timeline. The two are not interchangeable.
+    """
+
+    competitor: str
+    query: str
+    bank_id: str
+    signal_count: int
+    retrieval: str = "semantic-secondary"
     signals: list[Signal]

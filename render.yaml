@@ -1,17 +1,92 @@
+# Render blueprint — two services: FastAPI backend + Streamlit frontend.
+#
+# The app is two processes that used to ship as one container. They are split
+# here so the API and the UI can be scaled, restarted and observed
+# independently. Two consequences follow from the split:
+#
+#   1. The API must bind 0.0.0.0, not loopback. Render routes only to the
+#      service's published PORT, so binding 127.0.0.1 would be unreachable
+#      from outside even though the process is healthy.
+#   2. The frontend needs BACKEND_URL pointing at the backend's public URL.
+#      It is not set here because the hostname is only known after the backend
+#      is created (it looks like
+#      https://signalstack-backend.onrender.com). Set it in the frontend
+#      service's environment once the backend exists, and redeploy.
+#
+# On first deploy, fill in the two secret values when Render prompts:
+#   HINDSIGHT_API_KEY  (hsk_..., from https://ui.hindsight.vectorize.io)
+#   GROQ_API_KEY       (gsk_..., from https://console.groq.com/keys)
+#
+# A free web service spins down after ~15 minutes idle and wakes on the next
+# request, so the first load after a pause takes a few seconds. The backend is
+# the one that costs time on a cold start: it waits for Hindsight to answer
+# before serving /health, which the health check gives a generous window for.
 services:
+  # ---------------------------------------------------------------------------
+  # Backend: FastAPI. Public. This is what the frontend and any API client use.
+  # ---------------------------------------------------------------------------
   - type: web
     name: signalstack-backend
     runtime: python
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python -m uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
     envVars:
       - key: GROQ_API_KEY
-        sync: false
+        sync: false # enter in the dashboard; never committed
       - key: HINDSIGHT_API_KEY
-        sync: false
-      - key: AUTOSEED
-        value: "1"
+        sync: false # enter in the dashboard; never committed
       - key: HINDSIGHT_BASE_URL
         value: https://api.hindsight.vectorize.io
       - key: GROQ_BASE_URL
         value: https://api.groq.com/openai/v1
+      # Demo data is seeded on first boot when memory is empty. Set to 0 to
+      # never write to memory on start.
+      - key: AUTOSEED
+        value: "1"
+      # Optional write key. Leave unset to keep writes open (fine for a
+      # private demo). SET IT on a publicly reachable API: this service binds
+      # 0.0.0.0, and POST /signals and POST /competitors write to Hindsight on
+      # your account. Clients must then send the same value as X-API-Key.
+      # Set the identical value on signalstack-frontend so the UI can send it.
+      - key: API_KEY
+        sync: false
+      # POST /demo/reset deletes every competitor's memory bank. It does not
+      # exist unless this is 1, and 1 is only appropriate for a throwaway demo
+      # instance you are about to tear down. Anything with data you care about
+      # should leave this at 0 and restore with seed_data.py --reset --verify
+      # from a terminal instead, where the blast radius is visible.
+      - key: ENABLE_DEMO_RESET
+        value: "0"
+
+  # ---------------------------------------------------------------------------
+  # Frontend: Streamlit. Public, and the product surface a judge actually sees.
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: signalstack-frontend
+    runtime: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: >-
+      streamlit run frontend/app.py
+      --server.port $PORT
+      --server.address 0.0.0.0
+      --server.headless true
+      --browser.gatherUsageStats false
+    healthCheckPath: /_stcore/health
+    envVars:
+      # Set this to the backend's public URL after deploying the backend,
+      # e.g. https://signalstack-backend.onrender.com
+      - key: BACKEND_URL
+        sync: false
+      # Must match the backend's API_KEY exactly, or every write from the UI
+      # is refused with 401. Unset on both sides means writes stay open.
+      - key: API_KEY
+        sync: false
+      - key: STREAMLIT_BROWSER_GATHER_USAGE_STATS
+        value: "false"
+      - key: STREAMLIT_SERVER_HEADLESS
+        value: "true"
+      # Widen the client timeout: a cold-starting free backend plus a Groq
+      # rate-limit wait can exceed Streamlit's short default.
+      - key: SIGNAL_STACK_TIMEOUT
+        value: "180"

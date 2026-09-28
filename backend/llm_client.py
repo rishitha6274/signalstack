@@ -294,6 +294,38 @@ class GroqClient:
     _models_cache: Optional[set[str]] = None
     _models_probed = False
 
+    def probe_models(self) -> dict[str, Any]:
+        """GET /models once, for the startup check, and report WHY it failed.
+
+        `available_models` deliberately collapses every failure into None so the
+        call path can keep its configured order and move on. That is the right
+        behaviour there and the wrong one at boot: "this key was rejected" and
+        "the network blipped" call for different log levels and different
+        operator responses, and both look identical downstream. This keeps them
+        apart so startup can tell the operator which one happened.
+        """
+        try:
+            response = self._session.get(f"{self.base_url}/models", timeout=15)
+        except requests.RequestException as exc:
+            return {"ok": False, "ids": None, "status": None,
+                    "error": f"{type(exc).__name__}: {exc}"}
+        if response.status_code >= 400:
+            return {"ok": False, "ids": None, "status": response.status_code,
+                    "error": f"HTTP {response.status_code}"}
+        try:
+            ids = {m.get("id") for m in response.json().get("data", [])
+                   if m.get("id")}
+        except (ValueError, AttributeError) as exc:
+            return {"ok": False, "ids": None, "status": response.status_code,
+                    "error": f"unparseable body: {exc}"}
+        if not ids:
+            return {"ok": False, "ids": None, "status": response.status_code,
+                    "error": "response listed no models"}
+        self._models_cache = ids
+        self._models_probed = True
+        return {"ok": True, "ids": ids, "status": response.status_code,
+                "error": None}
+
     def available_models(self, *, refresh: bool = False) -> Optional[set[str]]:
         """Which models this Groq account can actually serve, or None if unknown.
 
@@ -512,3 +544,51 @@ class GroqClient:
 
 
 client = GroqClient()
+
+
+def verify_configured_models() -> list[str]:
+    """Check GROQ_MODEL and GROQ_FALLBACK_MODEL against this account.
+
+    Returns human-readable problems, empty when the configuration is servable.
+    Called once at startup, and deliberately returns findings rather than
+    logging or raising: the caller decides the level, and the suite asserts on
+    the text.
+
+    Model availability is per-account and per-plan. A model id that is valid
+    everywhere else 400s here, and the failure surfaces as a confusing
+    extraction error on the first signal rather than as "that model does not
+    exist on your plan" -- which is the message an operator can act on.
+    """
+    probe = client.probe_models()
+    if not probe["ok"]:
+        status = probe["status"]
+        if status in (401, 403):
+            return [
+                f"Groq rejected the API key (HTTP {status}) while listing models. "
+                f"Extraction and synthesis will fail on the first call: {probe['error']}"
+            ]
+        # No status means the request never completed. That is a network or
+        # DNS problem, not evidence about the key or the model ids, so it is
+        # reported as unverified rather than as a misconfiguration.
+        return [
+            f"Could not verify the configured Groq models ({probe['error']}); "
+            f"leaving GROQ_MODEL={PRIMARY_MODEL} unproven until the first call."
+        ]
+
+    ids = probe["ids"]
+    problems: list[str] = []
+    if PRIMARY_MODEL not in ids:
+        problems.append(
+            f"GROQ_MODEL={PRIMARY_MODEL} is not served by this Groq account. "
+            + (f"Requests will fall back to {FALLBACK_MODEL}."
+               if FALLBACK_MODEL in ids
+               else f"GROQ_FALLBACK_MODEL={FALLBACK_MODEL} is not served either, "
+                    f"so reads will fail. Models this account can serve: "
+                    f"{', '.join(sorted(ids)[:8])}.")
+        )
+    if FALLBACK_MODEL and FALLBACK_MODEL not in ids:
+        problems.append(
+            f"GROQ_FALLBACK_MODEL={FALLBACK_MODEL} is not served by this account, "
+            f"so there is no working fallback if {PRIMARY_MODEL} starts failing."
+        )
+    return problems

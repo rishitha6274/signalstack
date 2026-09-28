@@ -63,6 +63,14 @@ BANK_PREFIX: str = _env("BANK_PREFIX", "competitor")
 MAX_TIMELINE_PAGES: int = int(_env("MAX_TIMELINE_PAGES", "50"))
 TIMELINE_PAGE_SIZE: int = int(_env("TIMELINE_PAGE_SIZE", "200"))
 
+# How many signals may enter ONE prompt. A prompt is a budget: past a few dozen
+# dated signals the model stops tracking the chain and starts summarising, and
+# the numbers get quietly wrong. When a competitor's timeline is longer than
+# this, the most recent signals are kept and the omission is stated in the
+# prompt -- never applied silently, because a model told "12 signals" when the
+# bank holds 71 will report a complete analysis of a slice.
+MAX_SIGNALS_IN_PROMPT: int = int(_env("MAX_SIGNALS_IN_PROMPT", "40"))
+
 # --------------------------------------------------------------------------
 # Groq — the LLM used for signal extraction and strategic synthesis.
 # --------------------------------------------------------------------------
@@ -121,6 +129,46 @@ SIGNAL_STACK_API: str = _env("SIGNAL_STACK_API", f"http://127.0.0.1:{API_PORT}")
 # scripts/seed_data.py --reset became the honest way to manage memory. A fresh
 # deploy should set AUTOSEED=1 explicitly and mean it.
 AUTOSEED: str = _env("AUTOSEED", "0").lower() not in {"0", "false", "no"}
+
+# Whether POST /demo/reset exists at all. This route deletes every Signal Stack
+# bank, irreversibly, for every user of the deployment. That is a reasonable
+# thing for a hackathon demo instance that is torn down afterwards, and an
+# unreasonable thing to leave on by default -- so it is off unless someone sets
+# ENABLE_DEMO_RESET=1, and the UI hides its reset control unless /health
+# reports it enabled.
+#
+# The write key is a second, independent gate rather than the only one: with
+# API_KEY unset (the local default) the key check is a no-op, and a guard whose
+# strength depends on an unrelated variable being set is not a guard.
+ENABLE_DEMO_RESET: bool = _env("ENABLE_DEMO_RESET", "0").lower() in {
+    "1", "true", "yes", "on",
+}
+
+# --------------------------------------------------------------------------
+# Optional write auth.
+#
+# Unset (the default) means writes are unauthenticated, which is what local
+# development and the single-image demo want: two processes on one host, no
+# network boundary to defend. Set it before exposing the API — the backend
+# binds 0.0.0.0 on Render, and POST /signals and POST /competitors write to
+# Hindsight using your account's key, so an unauthenticated public write
+# endpoint is someone else's cloud bill.
+#
+# This is deliberately NOT full auth. It is a shared-secret write guard to keep
+# a demo deploy from being writable by anyone who finds the URL. Reads stay
+# open because the seeded competitor intelligence is not private, and gating
+# them would add friction to the demo for no confidentiality gain.
+#
+# Note this does not protect the read side: GET /timeline and POST /synthesize
+# remain unauthenticated, so a deployed API is still readable by anyone. That
+# is a deliberate trade for demo legibility, and it is the first thing to
+# revisit before any real user data goes in.
+API_KEY: str = _env("API_KEY", "")
+
+
+def write_auth_required() -> bool:
+    """True when API_KEY is set and writes must present a matching X-API-Key."""
+    return bool(API_KEY)
 
 
 def hindsight_configured() -> bool:

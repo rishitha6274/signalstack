@@ -13,10 +13,13 @@ complete, and that a thin competitor does not get a fabricated strategy.
 
 from __future__ import annotations
 
+import inspect
 import json
 import re
+import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -36,6 +39,22 @@ def check(name: str, condition: bool, detail: str = "") -> None:
     _results.append((bool(condition), name))
     mark = PASS if condition else FAIL
     print(f"  [{mark}] {name}" + (f"  {detail}" if detail and not condition else ""))
+
+
+_RECALL_USE = re.compile(
+    r"\brecall_signals\s*\(|\.recall\s*\(|import\s+[^\n]*\brecall\b")
+
+
+def synthesis_uses_recall(src: str) -> bool:
+    """True if synthesis reaches for recall at run time.
+
+    Prose about recall is allowed, and synthesis.py's own docstring explains
+    why it must not call recall -- matching the bare word would make the rule
+    unsatisfiable. What is forbidden is a call or an import.
+    """
+    code = "\n".join(ln for ln in src.splitlines()
+                     if not ln.strip().startswith("#"))
+    return bool(_RECALL_USE.search(code))
 
 
 def start_double():
@@ -443,6 +462,182 @@ def main() -> int:
           len(client.get_timeline("Nimbus AI")) == 13,
           f"got {len(client.get_timeline('Nimbus AI'))}")
 
+    print("\n\033[1m5b. The demo flip: one signal turns a refusal into a forecast\033[0m")
+    # This is the UI's hero path, so it is pinned end to end: Vertex Cloud is
+    # seeded with 4 signals, refuses, and the moment a 5th is logged it
+    # forecasts. The demo depends on the flip landing on exactly that click, so
+    # "it worked when I tried it" is not good enough.
+    #
+    # The floor in facts.py is what makes it flip, and it is bidirectional:
+    # below the floor, *forecasting* may only report confidence "none" -- so a
+    # forecast is not merely discouraged, it is unrepresentable. At or above the
+    # floor, *refusing* is no longer allowed at all. The refusal and the
+    # forecast each become the only permitted answer at their own side.
+    import statistics
+    from backend.facts import (MAX_INTERVAL_SPREAD as _MAX_SPREAD,
+                                MIN_SIGNALS_FOR_EVIDENCE, build_facts)
+    from backend.ingestion import load_seed_file
+    from backend.models import Signal
+    from backend.synthesis import generate_strategic_read, is_refusal as _is_refusal
+    from backend.validators import allowed_confidence_values
+
+    # load_seed_file() is already keyed by competitor name.
+    _vertex = list(load_seed_file()["Vertex Cloud"])
+    check("Vertex Cloud is seeded below the evidence floor (the demo's starting point)",
+          len(_vertex) < MIN_SIGNALS_FOR_EVIDENCE,
+          f"seeded with {len(_vertex)}, floor is {MIN_SIGNALS_FOR_EVIDENCE}")
+    check("one more signal crosses the floor",
+          len(_vertex) + 1 == MIN_SIGNALS_FOR_EVIDENCE,
+          f"{len(_vertex)} + 1 != {MIN_SIGNALS_FOR_EVIDENCE}")
+
+    def _vertex_signals(n: int) -> list[Signal]:
+        # Already Signal objects; copied so the extra append cannot mutate the
+        # module-level seed the later sections read.
+        out = [s.model_copy() for s in _vertex]
+        # The extra signal is a hire, the one signal type absent from the
+        # seeded four, and it is dated late so the interval spread stays wide.
+        # That is deliberate: it is what caps the result at medium instead of
+        # letting the demo promise high confidence on five data points.
+        if n > len(_vertex):
+            out.append(Signal(
+                competitor="Vertex Cloud", date="2026-09-14", signal_type="hiring",
+                summary=("Vertex Cloud posted a compliance engineer opening, "
+                         "its first security hire in the dataset."),
+                source="selfcheck", raw_text="compliance engineer",
+            ))
+        return out[:n]
+
+    _f4 = build_facts(_vertex_signals(4))
+    _f5 = build_facts(_vertex_signals(5))
+    check("below the floor: a forecast can only report confidence 'none'",
+          allowed_confidence_values(_f4, refused=False) == ("none",),
+          f"got {allowed_confidence_values(_f4, refused=False)}")
+    check("below the floor: refusing is the calibrated option",
+          allowed_confidence_values(_f4, refused=True) == ("none",),
+          f"got {allowed_confidence_values(_f4, refused=True)}")
+    check("at the floor: refusing is no longer permitted",
+          allowed_confidence_values(_f5, refused=True) == (),
+          f"got {allowed_confidence_values(_f5, refused=True)}")
+    check("at the floor: confidence is capped below high",
+          "high" not in allowed_confidence_values(_f5, refused=False),
+          f"got {allowed_confidence_values(_f5, refused=False)}")
+
+    # Why the cap is medium and not high. Not the dispersion rule: Vertex's
+    # intervals are ~[76, 83, 43, 33], so the longest gap is well inside 3x the
+    # median and dispersion PASSES. What holds confidence down is that the
+    # floor has only just been cleared -- five signals is the minimum, and
+    # nothing has repeated yet. Pinned here because the demo's closing line is
+    # "now it forecasts, at medium", and if a future seed edit made this
+    # genuinely well-evidenced the demo would quietly start promising "high"
+    # and overclaim on the strength of five data points.
+    from backend.facts import intervals as _intervals
+    _v4 = _intervals(_vertex_signals(4))
+    _v5 = _intervals(_vertex_signals(5))
+    check("dispersion is not what limits this timeline (it passes at both counts)",
+          max(_v5) <= _MAX_SPREAD * statistics.median(_v5),
+          f"intervals {_v5}, median {statistics.median(_v5)}, allowance {_MAX_SPREAD}x")
+    # `intervals()` returns the GAPS between signals, so a 5-signal timeline
+    # yields 4 intervals. Counting signals means asking the facts, not len().
+    check("the timeline is only just over the floor, which is what caps confidence",
+          _f5.n == MIN_SIGNALS_FOR_EVIDENCE,
+          f"facts n={_f5.n}, floor={MIN_SIGNALS_FOR_EVIDENCE}")
+    check("the four seeded signals alone are below the floor",
+          _f4.n == len(_vertex) < MIN_SIGNALS_FOR_EVIDENCE,
+          f"facts n={_f4.n}, seed={len(_vertex)}, floor={MIN_SIGNALS_FOR_EVIDENCE}")
+    check("no transition has repeated even after the fifth signal",
+          not _f5.repeated_transitions(),
+          f"repeated {list(_f5.repeated_transitions())}")
+    check("and at n=4 nothing repeated either",
+          not _f4.repeated_transitions(),
+          f"repeated {list(_f4.repeated_transitions())}")
+
+    # And the whole path against the live double: 4 refuses, log 1, 5 forecasts.
+    def _refused(resp) -> bool:
+        return _is_refusal({"patterns": resp.patterns,
+                            "confidence": resp.confidence.value,
+                            "predicted_next_move": resp.predicted_next_move})
+
+    _before = generate_strategic_read("Vertex Cloud")
+    check("demo start: Vertex refuses with confidence 'none'",
+          _refused(_before) and _before.confidence.value == "none",
+          f"refusal={_refused(_before)} confidence={_before.confidence.value}")
+    check("demo start: the refusal names how many more signals are needed",
+          "more signal" in _before.missing_evidence,
+          f"missing_evidence={_before.missing_evidence[:90]!r}")
+
+    _hired = _vertex_signals(5)[-1]
+    client.write_signal(_hired)
+    _after = generate_strategic_read("Vertex Cloud")
+    check("after logging one signal: Vertex no longer refuses",
+          not _refused(_after), "still refusing after the 5th signal")
+    check("after logging one signal: it now forecasts at medium or lower",
+          _after.confidence.value in ("medium", "low"),
+          f"got {_after.confidence.value}")
+    check("the flip is what the demo claims: refusal -> forecast, capped",
+          _refused(_before) and not _refused(_after)
+          and _after.confidence.value == "medium",
+          f"{_before.confidence.value} -> {_after.confidence.value}")
+    check("the forecast is dated, not vague",
+          re.search(r"\d{4}-\d{2}-\d{2}", _after.predicted_next_move) is not None,
+          f"got {_after.predicted_next_move[:100]!r}")
+
+    # The double's refusal threshold must track the app's floor, or the flip
+    # above verifies nothing: the app would permit a forecast the fake refuses.
+    import hindsight_double as _dbl
+    check("the double's refusal threshold IS the app's evidence floor",
+          _dbl._MIN_SIGNALS_FOR_EVIDENCE == MIN_SIGNALS_FOR_EVIDENCE,
+          f"double {_dbl._MIN_SIGNALS_FOR_EVIDENCE} vs app {MIN_SIGNALS_FOR_EVIDENCE}")
+
+    # And the fake must survive a short timeline. It used to narrate Nimbus's
+    # story with a hardcoded dates[5], raising IndexError -- a 500 the client
+    # sees as a disconnect -- on any timeline with fewer than six signals,
+    # which is exactly the demo's case.
+    check("the double can forecast a 5-signal timeline without crashing",
+          not _after.narrative_withheld
+          and _after.model_used != "fallback (no LLM)",
+          f"withheld={_after.narrative_withheld} model={_after.model_used}")
+    check("the double's forecast reads off the actual timeline, not a fixed script",
+          "2026-09-14" in _after.patterns,
+          f"the new signal is missing from the narrative: {_after.patterns[:120]!r}")
+    check("the double still narrates Nimbus's founding read specifically",
+          "series c" in (rich.patterns + rich.inferred_intent).lower())
+
+    # The UI's sample note has to be the one that produces the flip. If the
+    # seeder or the floor moves, this catches the sample going stale before a
+    # demo does.
+    _app_src = (REPO_ROOT / "frontend" / "app.py").read_text()
+    _SAMPLE_MARK = "SAMPLE_VERTEX_SIGNAL = ("
+    check("the UI defines a sample signal for the demo path",
+          _SAMPLE_MARK in _app_src, "SAMPLE_VERTEX_SIGNAL is missing")
+    if _SAMPLE_MARK in _app_src:
+        import re as _re
+        # The note is the first double-quoted run after the assignment.
+        _m = _re.search(r'"([^"]{40,})"',
+                        _app_src.split(_SAMPLE_MARK, 1)[1][:2000])
+        _note = _m.group(1) if _m else ""
+        check("the sample note is present and non-trivial",
+              len(_note) > 40, f"got {len(_note)} chars")
+        _sig = extract_signal(_note, "Vertex Cloud") if _note else None
+        check("the sample note extracts to a real signal",
+              _sig is not None and bool(_sig.signal_type),
+              "extraction returned nothing")
+        if _sig is not None:
+            check("the sample note is the type the flip needs (hiring)",
+                  _sig.signal_type == "hiring",
+                  f"got {_sig.signal_type}")
+            check("the sample's date is after the last seeded Vertex signal",
+                  _sig.date > max(s.date for s in _vertex),
+                  f"sample {_sig.date} vs last seeded {max(s.date for s in _vertex)}")
+            # And the decisive one: with this signal in place, the read flips.
+            client.write_signal(_sig)
+            _sample_read = generate_strategic_read("Vertex Cloud")
+            check("the UI's sample signal flips Vertex to a forecast",
+                  not _refused(_sample_read),
+                  f"still {_sample_read.confidence.value}")
+            check("and the flip is capped at medium or lower",
+                  _sample_read.confidence.value in ("medium", "low"),
+                  f"got {_sample_read.confidence.value}")
+
     print("\n\033[1m6. Malformed-LLM recovery\033[0m")
     from backend.llm_client import extract_json
 
@@ -612,6 +807,114 @@ def main() -> int:
               f"got {[(c.name, c.signal_count) for c in comps]}")
     finally:
         hc.REGISTRY_FILE, hc.SEED_FILE = real_reg, real_seed
+
+    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # 8b. Optional write auth (API_KEY). Two modes, both load-bearing:
+    # unset = writes are open, which is what local dev and the single-image
+    # demo need; set = a write without a matching X-API-Key is refused.
+    # The guard is exercised through the real FastAPI dependency rather than
+    # by calling the helper directly, so a route that stops declaring the
+    # dependency is caught here.
+    # ------------------------------------------------------------------
+    print("\n\033[1m8b. Optional write auth (API_KEY)\033[0m")
+    # Deliberately not TestClient: that needs httpx, which is not a runtime
+    # dependency of the app and is absent in a minimal checkout. The guard is
+    # verified two other ways that need nothing extra — the dependency is
+    # called directly, and the routes are checked for actually declaring it,
+    # so a route that drops the dependency fails here rather than silently
+    # reopening a write path.
+    _auth_checks()
+
+    print("\n\033[1m8a2. Memory visibility after an ingest\033[0m")
+    _memory_visibility_checks()
+
+    print("\n\033[1m8a3. Secondary recall (task 2)\033[0m")
+    _recall_checks()
+
+    print("\n\033[1m8a4. Prompt budget and startup model check\033[0m")
+    _prompt_budget_checks()
+
+    print("\n\033[1m8c. Rate limiting is distinguishable from a broken key\033[0m")
+    # A 429 is caught server-side and answered 200, so the HTTP status carries
+    # no signal at all. If rate_limited/retry_after_seconds ever disappear or
+    # stop being set, the UI silently degrades to "check GROQ_API_KEY" for a
+    # key that is working perfectly -- a wrong instruction, which is worse than
+    # no instruction. These checks exist to make that failure loud.
+    from backend.llm_client import RateLimitError
+    from backend.models import SynthesisResponse
+    from backend.synthesis import _fallback_response, generate_strategic_read
+    from backend import llm_client as llm_client_mod
+
+    limited = _fallback_response(
+        "Nimbus AI", list(nimbus), "429 Too Many Requests",
+        rate_limited=True, retry_after_seconds=20.0,
+    )
+    check("rate-limited fallback is flagged rate_limited",
+          limited.rate_limited is True, f"got {limited.rate_limited}")
+    check("rate-limited fallback carries the server's wait",
+          limited.retry_after_seconds == 20.0,
+          f"got {limited.retry_after_seconds}")
+    check("rate-limited recommendation says to wait, not to fix the key",
+          "wait" in limited.recommendation.lower()
+          and "GROQ_API_KEY" not in limited.recommendation,
+          f"got {limited.recommendation!r}")
+    check("rate-limited fallback still returns the deterministic read (200, not 5xx)",
+          limited.signal_count == len(nimbus) and bool(limited.patterns),
+          f"signal_count={limited.signal_count}")
+
+    broken = _fallback_response("Nimbus AI", list(nimbus), "401 Unauthorized")
+    check("a non-rate-limit failure is NOT flagged rate_limited",
+          broken.rate_limited is False, f"got {broken.rate_limited}")
+    check("a non-rate-limit failure has no wait to show",
+          broken.retry_after_seconds is None,
+          f"got {broken.retry_after_seconds}")
+    check("a non-rate-limit failure still points at the key",
+          "GROQ_API_KEY" in broken.recommendation,
+          f"got {broken.recommendation!r}")
+
+    # The two must not be confusable: same timeline, different advice.
+    check("rate-limit and broken-key advice are distinguishable",
+          limited.recommendation != broken.recommendation,
+          "both failures give the same advice")
+
+    # End-to-end through the real entry point with a stubbed client raising the
+    # concrete subclass, so the except ordering itself is under test. Catching
+    # LLMError first would silently swallow RateLimitError's retry_after.
+    real_call = llm_client_mod.client.call_llm_json
+
+    def _raise_rate_limit(prompt, model=None, **kw):
+        raise RateLimitError("rate limit exceeded", retry_after=42.0)
+
+    llm_client_mod.client.call_llm_json = _raise_rate_limit
+    try:
+        out = generate_strategic_read("Nimbus AI")
+        check("generate_strategic_read surfaces rate_limited end to end",
+              out.rate_limited is True, f"got {out.rate_limited}")
+        check("generate_strategic_read surfaces the wait end to end",
+              out.retry_after_seconds == 42.0,
+              f"got {out.retry_after_seconds}")
+    finally:
+        llm_client_mod.client.call_llm_json = real_call
+
+    def _raise_generic(prompt, model=None, **kw):
+        raise llm_client_mod.LLMError("connection reset")
+
+    llm_client_mod.client.call_llm_json = _raise_generic
+    try:
+        out = generate_strategic_read("Nimbus AI")
+        check("a generic LLM failure is not mistaken for a rate limit",
+              out.rate_limited is False, f"got {out.rate_limited}")
+    finally:
+        llm_client_mod.client.call_llm_json = real_call
+
+    # The schema must tolerate both, so an older cached response or a client
+    # that omits the new fields still validates.
+    check("SynthesisResponse defaults the new fields for old payloads",
+          SynthesisResponse(
+              competitor="X", patterns="p", inferred_intent="i",
+              predicted_next_move="m", recommendation="r",
+          ).rate_limited is False)
 
     # ------------------------------------------------------------------
     # ------------------------------------------------------------------
@@ -1566,9 +1869,14 @@ def main() -> int:
     import types
 
     from backend import facts as _facts
+    from backend import facts as _facts_mod
     from backend import llm_client as _llm
     from backend import synthesis as _syn
+    from backend import synthesis as _syn_mod
     from backend import validators as _val
+    from backend import validators as _val_mod
+    from backend.models import Signal as _Sig
+    from datetime import date as _date
 
     _runs = [0]
 
@@ -1652,7 +1960,7 @@ def main() -> int:
         "FACTS: blanking the block that carries the numbers",
         lambda: _stack(synthesis=_mutant_from(
             "backend.synthesis",
-            replacements=[("facts_block=facts.render() + facts.overdue_instruction(),",
+            replacements=[("facts_block=coverage + facts.render() + facts.overdue_instruction(),",
                            "facts_block='FACTS: removed by mutation',")])),
         lambda m: "FACTS (computed by the application" in
         m["syn"].build_prompt("Nimbus AI", _seed["Nimbus AI"], today=_TODAY),
@@ -2145,6 +2453,243 @@ def main() -> int:
         m["syn"]._correction_notice(["x"], m["F"](_seed["Palisade Security"])),
     )
 
+    # -- R: the recall rules, each one deleted to prove it is load-bearing ----
+    #
+    # Recall is the newest and the least exercised path, and its worst failure
+    # is silent: a biased slice of a timeline reads exactly like the timeline
+    # itself. So each rule below is mutated individually and must be caught.
+
+    def _recall_mutation_runs(label, build, fires):
+        """Same contract as _mutates, for paths outside the _stack quartet."""
+        intact = fires()
+        try:
+            mutant = build()
+        except AssertionError as exc:
+            check(f"{label}: the mutation applied cleanly", False, str(exc))
+            return
+        mutated = fires(mutant)
+        check(f"{label}: fires on the real code, silent once the rule is deleted",
+              intact is True and mutated is False,
+              f"intact={intact} mutated={mutated}")
+
+    def _rec_derived_rows_have_uids(m=None):
+        """True when recall never returns a row that is not a real signal.
+
+        Takes the module under test rather than reading the global singleton:
+        a mutation that is written to a clone and then never invoked proves
+        nothing, and would happily report the real code's behaviour as the
+        mutant's.
+        """
+        cli = (m or hc).client
+        rows = cli.recall_signals("Nimbus AI", "pattern pricing")
+        return bool(rows) and not any(
+            "recalled a pattern in the market" in (r.summary or "")
+            for r in rows)
+
+    # R1: the signal_uid guard, deleted. This is the one that matters most: a
+    # derived observation is the model's own commentary, not an observation, and
+    # presenting it as a dated signal is a fabricated citation.
+    _dbl_recall_uid = {
+        "id": "mut-recall-derived", "bank_id": "competitor-nimbus-ai",
+        "text": "Nimbus AI recalled a pattern in the market and repriced "
+        "its pricing.",
+        "context": "derived", "date": double._now(), "fact_type": "observation",
+        "document_id": None, "mentioned_at": double._now(),
+        "occurred_start": None, "state": "valid",
+        "tags": ["signal", "type:feature"], "metadata": {},
+        "entities": "Nimbus AI",
+    }
+    double.UNITS.append(_dbl_recall_uid)
+    try:
+        _recall_mutation_runs(
+            "R1: deleting the metadata.signal_uid guard in recall_signals",
+            lambda: _mutant_from(
+                "backend.hindsight_client",
+                replacements=[('        if not metadata.get("signal_uid"):\n'
+                           '            return None  # a derived observation, not one of our signals',
+                           '        if False:  # MUTANT\n'
+                           '            return None')]),
+            _rec_derived_rows_have_uids,
+        )
+    finally:
+        double.UNITS[:] = [u for u in double.UNITS
+                           if u.get("id") != "mut-recall-derived"]
+
+    # R2: the blank-query guard, deleted, so a whitespace-only question is
+    # answered with the top-k of nothing and reads as "no results".
+    from fastapi import HTTPException as _HE2
+    from backend import routes as _rts
+
+    def _rec_blank_q_rejected(m=None):
+        try:
+            (m or _rts).recall_signals("Nimbus AI", "   ")
+        except _HE2 as e:
+            return e.status_code == 422
+        return False
+
+    _recall_mutation_runs(
+        "R2: deleting the blank-q guard in the recall route",
+        lambda: _mutant_from(
+            "backend.routes",
+            replacements=[('        raise HTTPException(status_code=422, detail="q must not be blank")',
+                           "        pass  # MUTANT")]),
+        _rec_blank_q_rejected,
+    )
+
+    # R3: the unknown-bank 404, collapsed into an empty list. A typo would then
+    # be indistinguishable from an absence of evidence about a real company.
+    def _rec_unknown_bank_is_404(m=None):
+        try:
+            (m or _rts).recall_signals("Nobody Here", "anything at all")
+        except _HE2 as e:
+            return e.status_code == 404
+        return False
+
+    _recall_mutation_runs(
+        "R3: collapsing the unknown-bank 404 into an empty result",
+        lambda: _mutant_from(
+            "backend.routes",
+            replacements=[("        raise HTTPException(\n"
+                           "            status_code=404, detail=f\"No memory bank for '{competitor}'\"\n"
+                           "        ) from None",
+                           "        signals = []  # MUTANT")]),
+        _rec_unknown_bank_is_404,
+    )
+
+    # R4: synthesis reaching for recall. The isolation rule is a code-review
+    # convention unless something executes it, so the executable form is the
+    # point of this mutation. The rule it guards is checked by reading source,
+    # so the mutation is applied to source too -- a clone nobody calls would
+    # report the real code's cleanliness as the mutant's.
+    _synth_source_isolated = lambda src: not synthesis_uses_recall(src)
+
+    _synth_src = (REPO_ROOT / "backend" / "synthesis.py").read_text()
+    check("R4: synthesis stays isolated from recall (real source)",
+          _synth_source_isolated(_synth_src), "synthesis.py mentions recall")
+    _synth_mut, _hits = re.subn(
+        r"    signals = hindsight_client\.client\.get_timeline\(competitor\)",
+        '    signals = hindsight_client.client.recall_signals(\n'
+        '        competitor, "what is the pattern?")  # MUTANT',
+        _synth_src, count=1)
+    check("R4: the mutation applied cleanly", _hits == 1, f"hits={_hits}")
+    check("R4: pointing synthesis at recall is detected by the isolation check",
+          _synth_source_isolated(_synth_mut) is False,
+          "the mutated source still reads as isolated")
+
+    # R5: the double answering with rows that share no term with the question.
+    # The guard is the filter in the recall handler; the live server cannot be
+    # swapped mid-run, so the mutation is evaluated against the double's own
+    # scorer and its own bank contents.
+    def _double_recall_filter_drops_unmatched(src: str) -> bool:
+        m = re.search(r"^(\s*)hits = (\[.*?\])$", src, re.M)
+        if not m:
+            # No filter at all is the strongest form of the defect, not an
+            # error: the rule is gone, so it is not upheld. Presence is
+            # asserted separately so this cannot pass by accident.
+            return False
+        # Synthetic rows, not live bank contents: by this section earlier
+        # checks have legitimately reshaped the double, and a rule that only
+        # fires when some bank happens to be populated is not a rule.
+        rows = [{"text": "Nimbus AI raised its minimum contract.",
+                 "metadata": {"signal_summary": "Nimbus AI raised prices."},
+                 "mentioned_at": "2026-01-02T00:00:00Z"}]
+        terms = ["zzzqqq", "unrelated"]
+        _score = lambda u: (
+            -sum(1 for t in terms
+                 if t in f"{u.get('text', '')} "
+                         f"{(u.get('metadata') or {}).get('signal_summary', '')}".lower()),
+            u.get("mentioned_at") or "")
+        hits = eval(m.group(2), {"_score": _score}, {"rows": rows})
+        return bool(rows) and hits == []
+
+    _dbl_src = (REPO_ROOT / "tests" / "hindsight_double.py").read_text()
+    check("R5: the double's recall handler still filters (the rule exists at all)",
+          re.search(r"^\s*hits = \[u for u in rows if _score\(u\)\[0\] < 0\]$",
+                    _dbl_src, re.M) is not None,
+          "the recall filter assignment is missing from hindsight_double.py")
+    check("R5: the double answers an unrelated query with nothing (real source)",
+          _double_recall_filter_drops_unmatched(_dbl_src), "")
+    _dbl_mut, _hits = re.subn(
+        r"^(\s*)hits = \[u for u in rows if _score\(u\)\[0\] < 0\]$",
+        r"\1hits = list(rows)  # MUTANT", _dbl_src, count=1, flags=re.M)
+    check("R5: the mutation applied cleanly", _hits == 1, f"hits={_hits}")
+    check("R5: ranking unmatched rows is caught",
+          _double_recall_filter_drops_unmatched(_dbl_mut) is False,
+          "the mutated filter still drops everything")
+
+    # -- P: the prompt budget, mutated --------------------------------------
+    #
+    # The dangerous version of this feature is not the cap, it is the cap
+    # without the disclosure. Each of these deletes one half of the guarantee
+    # and must be caught.
+
+    def _prompt_window_is_newest(m=None):
+        """True when the prompt keeps the most recent signals."""
+        mod = m or _syn_mod
+        sigs = [_Sig(competitor="B", date=f"2026-01-{i + 1:02d}",
+                     signal_type="pricing", summary=f"step {i}")
+                for i in range(6)]
+        kept, dropped = mod.fit_prompt_window(sigs, limit=3)
+        return dropped == 3 and kept[-1].date == sigs[-1].date
+
+    _recall_mutation_runs(
+        "P1: the prompt window keeping the OLDEST signals instead of the newest",
+        lambda: _mutant_from(
+            "backend.synthesis",
+            replacements=[("    return ordered[-cap:], len(ordered) - cap",
+                           "    return ordered[:cap], len(ordered) - cap  # MUTANT")]),
+        _prompt_window_is_newest,
+    )
+
+    def _prompt_declares_omission(m=None):
+        mod = m or _syn_mod
+        sigs = [_Sig(competitor="B", date=f"2026-02-{i + 1:02d}",
+                     signal_type="pricing", summary=f"step {i}")
+                for i in range(6)]
+        # Lower the cap rather than padding the chain to today's default: the
+        # property under test is the disclosure, not the particular number 40.
+        original = mod.MAX_SIGNALS_IN_PROMPT
+        mod.MAX_SIGNALS_IN_PROMPT = 3
+        try:
+            prompt = mod.build_prompt("B", sigs, today=_date(2026, 3, 1))
+        finally:
+            mod.MAX_SIGNALS_IN_PROMPT = original
+        return ("EVIDENCE COVERAGE: PARTIAL" in prompt
+                and "3 of 6" in prompt)
+
+    _recall_mutation_runs(
+        "P2: truncating the prompt without telling the model what is missing",
+        lambda: _mutant_from(
+            "backend.synthesis",
+            # The prompt is truncated exactly as before; what is deleted is
+            # the admission of it. That is the failure being guarded against --
+            # a window that never says it is one.
+            replacements=[("        if not omitted\n        else f\"- EVIDENCE COVERAGE: PARTIAL.",
+                           "        if True or not omitted  # MUTANT: the PARTIAL branch "
+                           "is unreachable\n        else f\"- EVIDENCE COVERAGE: PARTIAL.")]),
+        _prompt_declares_omission,
+    )
+
+    def _partial_claim_is_blocked(m=None):
+        mod = m or _val_mod
+        facts = _facts_mod.build_facts(
+            [_Sig(competitor="B", date="2026-02-01", signal_type="pricing",
+                  summary="x")],
+            today=_date(2026, 3, 1), omitted=9, omitted_before="2025-01-01")
+        return mod.check_no_partial_claims(
+            {"patterns": "Across their entire history they repriced.",
+             "inferred_intent": "", "predicted_next_move": "",
+             "recommendation": "", "missing_evidence": ""}, facts) != []
+
+    _recall_mutation_runs(
+        "P3: deleting the check that stops a window being called a whole history",
+        lambda: _mutant_from(
+            "backend.validators",
+            replacements=[("    if not facts.omitted:\n        return []",
+                           "    if True:  # MUTANT\n        return []")]),
+        _partial_claim_is_blocked,
+    )
+
     # A floor, not an exact count: the point is that a mutation which fails to
     # apply is reported above rather than silently counted, so a floor catches
     # a batch of them being dropped wholesale.
@@ -2176,6 +2721,994 @@ def re_date(token: str) -> bool:
     import re
 
     return bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", token))
+
+
+def _memory_visibility_checks() -> None:
+    """The three things a user must be able to see after logging a signal.
+
+    Streamlit cannot be executed inside the suite, so these assert the
+    structure of frontend/app.py rather than the rendered output. That is a
+    real limit and worth stating: what is pinned here is *that the calls are
+    made in this order and are not conditional on each other*, which is the
+    part that silently regresses -- a diff that renders only when the read
+    succeeds looks identical in source review and is wrong in the product.
+    """
+    src = (REPO_ROOT / "frontend" / "app.py").read_text()
+
+    # 1. With a cached read, the after-read runs by itself.
+    check("the cached-read branch no longer waits for a button",
+          "🔁 Re-read and show what changed" not in src,
+          "the after-read is still behind a second click")
+    _seg = src.split("### 🧠 What your signal changed")[1].split("#### Side by side")[0]
+    check("the after-read issues POST /synthesize without a st.button wrapper",
+          'api("POST", "/synthesize", json={"competitor": selected})' in _seg
+          and "🔁 Re-read" not in _seg,
+          "no synthesize call in the ingest-diff block")
+    # Pinned as the literal guard expression, not merely as a present string:
+    # "the call is in the source" also holds when the call is dead code behind
+    # `if False and ...`, which is exactly how this check was caught being
+    # vacuous. Asserting the positive form is the closest a non-executable UI
+    # test can get to asserting that the call actually runs.
+    check("the automatic after-read is gated on a live per-signal condition",
+          "if _uid not in _auto_done:" in _seg,
+          "the synthesize call is present but unreachable (dead-code guard)")
+    check("nothing between that guard and the read can reintroduce a click",
+          "st.button(" not in _seg.split("if _uid not in _auto_done:")[1]
+          .split('api("POST", "/synthesize"')[0],
+          "a button sits between the guard and the automatic read")
+    check("the automatic after-read is guarded per signal, not per rerun",
+          "ss_auto_reread" in _seg and "_uid not in _auto_done" in _seg,
+          "an unguarded call re-reads the timeline on every Streamlit rerun")
+    check("the guard is cleared by a reset, so a fresh demo can auto-read again",
+          'st.session_state.pop("ss_auto_reread", None)' in src,
+          "ss_auto_reread survives a reset and permanently blocks the diff")
+
+    # 2. The write's receipt is unconditional; the read is not.
+    _delta_at = _seg.find("memory_delta(selected, _pending)")
+    _before_at = _seg.find("_before = st.session_state.get")
+    check("the memory delta renders before the follow-up read is attempted",
+          _delta_at != -1 and _before_at != -1 and _delta_at < _before_at,
+          f"delta at {_delta_at}, read branch at {_before_at}")
+    check("a rate-limited after-read still reports the wait",
+          'if _after.get("rate_limited")' in _seg and "wait about" in _seg,
+          "the rate-limit path does not tell the user to wait")
+    check("a rate-limited after-read keeps the write receipt on screen",
+          "memory_delta(selected, _pending)" in _seg.split('if _after.get("rate_limited")')[0],
+          "the delta is gated behind a successful re-read")
+    check("a rate-limited after-read says the stored signal is fine",
+          "Your signal is stored" in _seg,
+          "a 429 reads as a lost write")
+
+    # 3. No cached read: the counts and the new row, without a hidden LLM call.
+    check("the no-cached-read branch still shows what grew",
+          "Memory has grown." in _seg,
+          "the no-cached-read branch reports nothing")
+    _fn = src.split("def memory_delta")[1].split("\ndef ")[0]
+    # Scoped to the call expressions, not the bare field names: those also
+    # appear in this function's own docstring, so a name-only match passed even
+    # with the caption stripped of the field.
+    for _field in ("signal_count", "fact_count", "last_write_at"):
+        check(f"the delta reads {_field} out of the bank record",
+              f"bank.get('{_field}'" in _fn,
+              f"{_field} is never read from the record, so it cannot be shown")
+    # Window rather than paren-split: the caption's own argument list contains
+    # bank.get(...) parentheses, so splitting on ")" truncates mid-expression.
+    _cap = _fn.split("st.caption(")[1][:400] if "st.caption(" in _fn else ""
+    check("the delta caption renders all three values, not just one",
+          all(f"bank.get('{f}'" in _cap for f in
+              ("signal_count", "fact_count", "last_write_at")),
+          f"caption: {_cap[:200]!r}")
+    check("the delta shows the new signal as a dated, typed row",
+          "row.get('date')" in _fn and "row.get('signal_type')" in _fn,
+          "the new timeline row is not rendered")
+    check("the delta reads the row back from Hindsight instead of echoing the POST",
+          "fetch_timeline(competitor)" in _fn,
+          "the row is echoed from the write response, so a lost write looks stored")
+    check("the no-cached-read branch does not auto-run a read",
+          'if st.button("🧠 Generate read to see what changed")' in _seg,
+          "an unrequested LLM call is made on ingest")
+
+
+def _prompt_budget_checks() -> None:
+    """A prompt is a budget, and going over it must be visible, not silent.
+
+    The cap itself is unremarkable. What matters is the second half: when
+    signals are left out, every figure the model is allowed to cite is computed
+    from the signals it can actually see, so a silently truncated prompt yields
+    a fluent analysis of a fragment that reports itself as the whole timeline.
+    The coverage line and the completeness validator are what stop that, and
+    both are asserted here.
+    """
+    from datetime import date as _date
+
+    from backend import facts as _facts_mod
+    from backend import synthesis as _syn
+    from backend import validators as _val
+    from backend.config import MAX_SIGNALS_IN_PROMPT
+    from backend.models import Signal as _Sig
+
+    check("MAX_SIGNALS_IN_PROMPT is a positive integer",
+          isinstance(MAX_SIGNALS_IN_PROMPT, int) and MAX_SIGNALS_IN_PROMPT > 0,
+          f"got {MAX_SIGNALS_IN_PROMPT!r}")
+    check("MAX_SIGNALS_IN_PROMPT is documented as an env knob in config",
+          "MAX_SIGNALS_IN_PROMPT" in
+          (REPO_ROOT / "backend" / "config.py").read_text()
+          and "MAX_SIGNALS_IN_PROMPT" in (REPO_ROOT / ".env.example").read_text(),
+          "the cap is not configurable from the environment")
+
+    def _chain(n: int) -> list[_Sig]:
+        return [
+            _Sig(competitor="Budget Co", date=f"2026-{1 + i // 28:02d}-"
+                                             f"{1 + i % 28:02d}",
+                 signal_type="pricing",
+                 summary=f"Budget Co moved on step {i} of the pricing chain.")
+            for i in range(n)
+        ]
+
+    # Under the cap: nothing is dropped, and the prompt says so.
+    _under = _chain(5)
+    _win, _drop = _syn.fit_prompt_window(_under)
+    check("a timeline under the cap is passed whole", _drop == 0 and len(_win) == 5,
+          f"dropped={_drop} kept={len(_win)}")
+    _p_under = _syn.build_prompt("Budget Co", _under, today=_date(2026, 3, 1))
+    check("a complete read is labelled COMPLETE",
+          "EVIDENCE COVERAGE: COMPLETE" in _p_under,
+          _p_under[:0] or "the coverage line is missing")
+    check("a complete read says how many signals it saw",
+          f"All 5 signals" in _p_under, "")
+
+    # Over the cap: the newest survive, the oldest go, and both are reported.
+    _over = _chain(MAX_SIGNALS_IN_PROMPT + 12)
+    _win, _drop = _syn.fit_prompt_window(_over)
+    check("an over-long timeline is capped", len(_win) == MAX_SIGNALS_IN_PROMPT,
+          f"kept={len(_win)}")
+    check("the cap drops exactly the surplus", _drop == 12, f"dropped={_drop}")
+    check("the cap keeps the most recent signals, not the first ones",
+          [s.date for s in _win] == [s.date for s in _over[-MAX_SIGNALS_IN_PROMPT:]],
+          f"kept {[s.date for s in _win][:2]} vs newest "
+          f"{[s.date for s in _over[-MAX_SIGNALS_IN_PROMPT:]][:2]}")
+    check("the dropped signals are the oldest",
+          _win[0].date > _over[0].date,
+          f"first kept {_win[0].date} vs first overall {_over[0].date}")
+
+    _p_over = _syn.build_prompt("Budget Co", _over, today=_date(2026, 3, 1))
+    check("a truncated read is labelled PARTIAL",
+          "EVIDENCE COVERAGE: PARTIAL" in _p_over, "")
+    check("a truncated read states how many signals it saw and how many exist",
+          f"{MAX_SIGNALS_IN_PROMPT} of {MAX_SIGNALS_IN_PROMPT + 12}" in _p_over,
+          "the coverage line does not give both counts")
+    check("a truncated read names the date the window opens",
+          _win[0].date in _p_over, "the window start date is not in the prompt")
+    check("a truncated read tells the model the oldest are NOT shown",
+          "the 12 OLDEST are NOT" in _p_over, "")
+    check("the omitted signals are absent from the rendered timeline",
+          _over[0].summary not in _p_over,
+          "an omitted signal is still in the prompt")
+
+    # The validator: a window described as the whole history is a defect.
+    _facts_partial = _facts_mod.build_facts(
+        _win, today=_date(2026, 3, 1), omitted=_drop, omitted_before=_win[0].date)
+    _claims = {
+        "patterns": "Across their entire history they repriced on a cadence.",
+        "inferred_intent": "Monetisation pressure.",
+        "predicted_next_move": "Another price rise.",
+        "recommendation": "Watch pricing.",
+        "missing_evidence": "",
+    }
+    check("a completeness claim over a window is rejected",
+          bool(_val.check_no_partial_claims(_claims, _facts_partial)),
+          "the validator accepted a whole-history claim built from a window")
+    check("the rejection names the counts and the window start",
+          all(t in _val.check_no_partial_claims(_claims, _facts_partial)[0]
+              for t in (str(MAX_SIGNALS_IN_PROMPT), _win[0].date)),
+          f"got {_val.check_no_partial_claims(_claims, _facts_partial)}")
+    _disclosed = dict(_claims, patterns=(
+        f"Across the {MAX_SIGNALS_IN_PROMPT} signals shown, from "
+        f"{_win[0].date}, they repriced on a cadence."))
+    check("a completeness claim that discloses the window is accepted",
+          _val.check_no_partial_claims(_disclosed, _facts_partial) == [],
+          f"got {_val.check_no_partial_claims(_disclosed, _facts_partial)}")
+    _facts_full = _facts_mod.build_facts(_over, today=_date(2026, 3, 1))
+    check("with nothing omitted, completeness language is fine",
+          _val.check_no_partial_claims(_claims, _facts_full) == [],
+          "the validator fired on a complete timeline")
+
+    # A cap of zero must fail loudly rather than produce an empty prompt.
+    try:
+        _syn.fit_prompt_window(_over, limit=0)
+    except ValueError:
+        _raised = True
+    else:
+        _raised = False
+    check("a non-positive cap raises instead of analysing nothing", _raised, "")
+
+    # The read reports its own provenance.
+    check("SynthesisResponse carries the prompt window counts",
+          {"prompt_signal_count", "signals_omitted_from_prompt",
+           "prompt_window_opens"} <= set(
+              __import__("backend.models", fromlist=["SynthesisResponse"])
+              .SynthesisResponse.model_fields),
+          "the response does not report what the model actually saw")
+
+    # The reader is told, not just the model.
+    _app_src = (REPO_ROOT / "frontend" / "app.py").read_text()
+    check("the UI reports the prompt window when signals were omitted",
+          "signals_omitted_from_prompt" in _app_src
+          and "prompt_signal_count" in _app_src,
+          "a truncated read renders as a whole one")
+    check("the UI names the date the window opens",
+          "prompt_window_opens" in _app_src,
+          "the reader is not told where the evidence starts")
+
+    # The startup model check: findings, not logging, and no exceptions.
+    from backend import llm_client as _llm
+    from backend.main import bootstrap as _boot
+
+    check("verify_configured_models returns a list of findings",
+          isinstance(_llm.verify_configured_models(), list),
+          "the startup model check does not return findings")
+    check("the startup path calls the model check",
+          "verify_configured_models" in (REPO_ROOT / "backend" / "main.py").read_text(),
+          "bootstrap never verifies the configured models")
+    check("the model check cannot stop the service booting",
+          "except Exception" in (REPO_ROOT / "backend" / "main.py").read_text()
+          and "verify_configured_models" in
+          (REPO_ROOT / "backend" / "main.py").read_text(),
+          "a probe failure is not contained in bootstrap")
+
+    # The three outcomes, driven through the double rather than the real API.
+    import requests as _rq
+
+    def _probe_with(payload, status=200, boom=False):
+        class _R:
+            status_code = status
+            text = "probe"
+
+            def json(_self):
+                if boom:
+                    raise ValueError("not json")
+                return {"data": [{"id": i} for i in payload]}
+        return _R()
+
+    _real_get = _llm.client._session.get
+    try:
+        _llm.client._models_probed = False
+        _llm.client._models_cache = None
+        # A healthy account: both configured models served.
+        _llm.client._models_probed = False
+        _llm.client._session.get = lambda *a, **k: _probe_with(
+            [_llm.PRIMARY_MODEL, _llm.FALLBACK_MODEL])
+        check("a servable primary model reports no problem",
+              _llm.verify_configured_models() == [],
+              f"got {_llm.verify_configured_models()}")
+        _llm.client._models_probed = False
+        _llm.client._session.get = lambda *a, **k: _probe_with(
+            [_llm.PRIMARY_MODEL])
+        check("an unserved fallback is reported even when the primary is fine",
+              any(_llm.FALLBACK_MODEL in p
+                  for p in _llm.verify_configured_models()),
+              "a missing fallback passes unnoticed")
+
+        _llm.client._models_probed = False
+        _llm.client._session.get = lambda *a, **k: _probe_with(
+            ["some/other-model"])
+        _probs = _llm.verify_configured_models()
+        check("an unserved primary model is reported by name",
+              any(_llm.PRIMARY_MODEL in p for p in _probs),
+              f"got {_probs}")
+        check("an unserved primary with no usable fallback says reads will fail",
+              any("will fail" in p for p in _probs), f"got {_probs}")
+        check("the served models are listed so the operator can pick one",
+              any("some/other-model" in p for p in _probs), f"got {_probs}")
+
+        _llm.client._models_probed = False
+        _llm.client._session.get = lambda *a, **k: _probe_with(
+            [_llm.FALLBACK_MODEL])
+        _probs = _llm.verify_configured_models()
+        check("an unserved primary with a served fallback says it falls back",
+              any("fall back" in p for p in _probs), f"got {_probs}")
+
+        _llm.client._models_probed = False
+        _llm.client._session.get = lambda *a, **k: _probe_with(
+            [_llm.PRIMARY_MODEL], status=401)
+        _probs = _llm.verify_configured_models()
+        check("a rejected key is reported as a key problem, not a model problem",
+              any("rejected the API key" in p for p in _probs), f"got {_probs}")
+
+        def _boom(*a, **k):
+            raise _rq.RequestException("connection reset")
+        _llm.client._models_probed = False
+        _llm.client._session.get = _boom
+        _probs = _llm.verify_configured_models()
+        check("a network failure is reported as unverified, not as misconfiguration",
+              any("Could not verify" in p for p in _probs)
+              and not any("rejected" in p for p in _probs), f"got {_probs}")
+
+        _llm.client._models_probed = False
+        _llm.client._session.get = lambda *a, **k: _probe_with([], boom=True)
+        _probs = _llm.verify_configured_models()
+        check("an unparseable model list is reported, not raised",
+              any("Could not verify" in p for p in _probs), f"got {_probs}")
+    finally:
+        _llm.client._session.get = _real_get
+        _llm.client._models_probed = False
+        _llm.client._models_cache = None
+
+
+def _recall_checks() -> None:
+    """Recall answers a question. It must never become the analysis substrate.
+
+    The rule that matters is negative and structural: synthesis must never
+    import or call recall. Recall returns the k most semantically similar
+    memories, so a synthesis built on it would analyse a biased slice of the
+    timeline and report the bias as a finding about the company. That is the
+    failure the timeline method's docstring was written to prevent, and it is
+    worth an executable assertion rather than a code-review convention.
+    """
+    # --- the separation itself, asserted against the real module ----------
+    _syn = (REPO_ROOT / "backend" / "synthesis.py").read_text()
+    _syn_code = "\n".join(
+        ln for ln in _syn.splitlines() if not ln.strip().startswith("#")
+    )
+    check("synthesis.py neither calls nor imports recall",
+          not synthesis_uses_recall(_syn),
+          f"synthesis.py uses recall: "
+          f"{_RECALL_USE.findall(_syn)[:3]}")
+    _probe = subprocess.run(
+        [sys.executable, "-c",
+         "import sys; sys.path.insert(0,'.')\n"
+         "import backend.synthesis as s\n"
+         "names=[n for n in dir(s) if 'recall' in n.lower()]\n"
+         "src=open('backend/synthesis.py').read()\n"
+         "print(names, 'recall_signals' in src)\n"],
+        capture_output=True, text=True,
+    )
+    check("importing synthesis exposes no recall symbol",
+          _probe.returncode == 0 and _probe.stdout.strip().endswith("[] False"),
+          f"got {_probe.stdout.strip()!r} {_probe.stderr[-160:]}")
+
+    # And the real retrieval path is still the complete timeline.
+    check("synthesis still retrieves via get_timeline",
+          "get_timeline" in _syn_code, "synthesis no longer uses get_timeline")
+
+    # --- client behaviour, against the double ------------------------------
+    import json as _json
+    import urllib.error as _ue
+    import urllib.request as _ur
+
+    _hc = _json.dumps  # noqa: F841  (readability only)
+    from backend import hindsight_client as hcl
+
+    def _recall_raw(bank: str, body: dict) -> dict:
+        req = _ur.Request(
+            f"{BASE}/v1/default/banks/{bank}/memories/recall",
+            data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json",
+                     "Authorization": "Bearer hsk_selftest"},
+            method="POST",
+        )
+        with _ur.urlopen(req, timeout=10) as r:
+            return json.loads(r.read())
+
+    # Self-seeding: earlier sections may have emptied or reshaped the shared
+    # double, so this one writes the fixture it needs and removes it after,
+    # rather than inheriting whatever state it happens to run in.
+    import hindsight_double as _d
+    from backend.models import Signal as _Sig
+    _bank = "competitor-recall-fixture"
+    _fixture_signals = [
+        _Sig(competitor="Recall Fixture", date="2026-03-02", signal_type="pricing",
+             summary="Recall Fixture raised its minimum contract to $40,000.",
+             source="probe"),
+        _Sig(competitor="Recall Fixture", date="2026-07-19", signal_type="feature",
+             summary="Recall Fixture shipped automatic regional failover.",
+             source="probe"),
+    ]
+    # Writing a signal registers the display name in data/competitors.json --
+    # a gitignored file, so a leaked test fixture there is invisible to
+    # `git status` and outlives the run. Snapshot it BEFORE the write.
+    _REG = hcl._read_registry()
+    _REG_BEFORE = dict(_REG)
+    hcl.client.write_signals(_fixture_signals)
+    _UNITS_BEFORE = len(_d.UNITS)
+    # The spec's default tags_match is "any", which INCLUDES untagged rows.
+    _loose = _recall_raw(_bank, {"query": "failover", "tags": ["signal"]})
+    _strict = _recall_raw(_bank, {"query": "failover", "tags": ["signal"],
+                                  "tags_match": "all_strict"})
+
+    check("the double reproduces the spec default that leaks untagged rows",
+          len(_loose["results"]) >= len(_strict["results"]),
+          f"loose={len(_loose['results'])} strict={len(_strict['results'])}")
+    check("the client sends tags_match=all_strict explicitly",
+          "all_strict" in (REPO_ROOT / "backend" / "hindsight_client.py").read_text(),
+          "the client omits tags_match, so Hindsight's 'any' default applies")
+    check("strict scoping returns a subset of the loose scope",
+          len(_strict["results"]) <= len(_loose["results"]),
+          f"strict={len(_strict['results'])} loose={len(_loose['results'])}")
+
+    # A recall result has no `date` field, per the spec. If the double ever
+    # grew one, this stops testing the real mapping hazard.
+    # The real RecallResult has no `date`; the double must not invent one, or a
+    # client reading result["date"] would work here and raise KeyError against
+    # the live API. occurred_start/mentioned_at are the real date carriers.
+    check("a recall result carries no date field (real 0.10.1 shape)",
+          _strict["results"] and "date" not in _strict["results"][0],
+          f"keys: {sorted(_strict['results'][0])}")
+    check("a recall result carries a real date via occurred_start",
+          bool(_strict["results"][0].get("occurred_start")
+               or _strict["results"][0].get("mentioned_at")),
+          f"result: {_strict['results'][0]}")
+
+    # The signal_uid guard, not the tags, is what keeps derived observations
+    # out: the double's own notes record that observations INHERIT tags.
+    _d.UNITS.append({
+        "id": "obs-check", "bank_id": _bank,
+        "text": "Recall Fixture appears to be shifting failover strategy "
+        "based on recent activity.",
+        "context": "derived", "date": _d._now(), "fact_type": "observation",
+        "document_id": None, "mentioned_at": _d._now(), "occurred_start": None,
+        "state": "valid", "tags": ["signal", "type:feature"], "metadata": {},
+        "entities": "Signal Stack",
+    })
+    try:
+        _noisy = _recall_raw(_bank, {"query": "failover", "tags": ["signal"],
+                                     "tags_match": "all_strict"})
+        _derived_in_api = [
+            r for r in _noisy["results"]
+            if not (r.get("metadata") or {}).get("signal_uid")
+        ]
+        check("a derived observation with no signal_uid reaches the API response",
+              len(_derived_in_api) >= 1,
+              "the fixture did not produce a derived row, so the guard is untested")
+        _client_out = hcl.client.recall_signals("Recall Fixture", "failover")
+        check("the client drops it: every returned Signal is a real signal",
+              _client_out and all(s.uid for s in _client_out),
+              f"returned {len(_client_out)} rows")
+        check("the client returns strictly fewer rows than the API did",
+              len(_client_out) < len(_noisy["results"]),
+              f"client={len(_client_out)} api={len(_noisy['results'])}")
+        check("recall results are typed and dated Signals",
+              all(s.date and s.signal_type and s.summary for s in _client_out),
+              "a returned row is missing date, type or summary")
+        check("recall dedupes by signal_uid",
+              len({s.uid for s in _client_out}) == len(_client_out),
+              "the same signal came back more than once")
+    finally:
+        _d.UNITS[:] = [u for u in _d.UNITS if u.get("id") != "obs-check"]
+        assert len(_d.UNITS) == _UNITS_BEFORE, "fixture leaked into the double"
+
+    # Empty match and the cap.
+    _none = hcl.client.recall_signals("Recall Fixture", "zzzqqq nonexistent term")
+    check("a query matching nothing returns an empty list, not an error",
+          _none == [], f"got {len(_none)} rows")
+    check("the result cap is enforced",
+          len(hcl.client.recall_signals("Recall Fixture", "signal", limit=2)) <= 2,
+          "limit was ignored")
+
+    # --- endpoint validation, over HTTP ------------------------------------
+    from fastapi import HTTPException as _HE
+    from backend import routes as _routes
+
+    def _call(fn, *a, **kw) -> tuple[int, object]:
+        """Invoke a route function and report the status it would answer with.
+
+        The suite has no running ASGI app (TestClient needs httpx, which is not
+        a runtime dependency), so the route body is called directly and its
+        HTTPException status captured. That is what the 422/404 behaviour
+        actually consists of; what it does not cover is FastAPI's own parameter
+        validation, which is asserted separately below.
+        """
+        try:
+            return 200, fn(*a, **kw)
+        except _HE as e:
+            return e.status_code, e.detail
+
+    def _get(q: str, competitor: str = "Recall Fixture") -> tuple[int, object]:
+        return _call(_routes.recall_signals, competitor, q)
+
+    _st, _body = _get("failover")
+    check("GET /recall with a q returns 200", _st == 200, f"got {_st} {_body}")
+    check("the response labels itself as secondary retrieval",
+          getattr(_body, "retrieval", "") == "semantic-secondary", f"body: {_body}")
+    check("the response echoes the query it answered",
+          getattr(_body, "query", "") == "failover", f"body: {_body}")
+    check("the response is not the timeline shape (no signal_count-only payload)",
+          hasattr(_body, "signals") and hasattr(_body, "retrieval"),
+          f"body: {_body}")
+    _st, _det = _get("   ")
+    check("a blank q is rejected with 422", _st == 422, f"got {_st}")
+    _st, _det = _get("x" * 201)
+    check("a q over 200 characters is rejected with 422", _st == 422, f"got {_st}")
+    check("the length limit is the documented 200",
+          "200" in str(_det), f"detail: {_det}")
+    _st, _det = _get("anything", "competitor-does-not-exist")
+    check("an unknown bank is 404, not an empty list", _st == 404, f"got {_st}")
+    check("the 404 says which bank was missing",
+          "does-not-exist" in str(_det), f"detail: {_det}")
+
+    # FastAPI's own validation, which the direct call above bypasses: q is
+    # required and bounded at the schema level, so a missing or over-long q is
+    # refused before the handler body runs at all.
+    _rp = _routes.router.routes
+    _recall_route = [x for x in _rp if x.path == "/recall/{competitor}"]
+    check("the recall route is registered as a GET",
+          _recall_route and "GET" in (_recall_route[0].methods or set()),
+          f"routes: {[x.path for x in _rp if 'recall' in x.path]}")
+    _sig = inspect.signature(_routes.recall_signals)
+    # FastAPI here hands the Query(...) marker to the parameter default, and
+    # the MinLen/MaxLen constraints hang off that object's .metadata -- not off
+    # the annotation, and not as attributes of the marker itself.
+    _qparam = _sig.parameters["q"]
+    _qdef = _qparam.default
+    from pydantic_core import PydanticUndefined as _Undef
+    _qfield = [f for f in _recall_route[0].dependant.query_params
+               if f.name == "q"]
+    check("q is a required query parameter, not a defaulted body field",
+          _qparam.default is not inspect.Parameter.empty
+          and type(_qdef).__name__ == "Query"
+          and _qdef.default is _Undef
+          and _qfield and _qfield[0].get_default() is _Undef,
+          f"default: {_qdef!r} (type {type(_qdef).__name__}), "
+          f"fastapi default: {_qfield[0].get_default() if _qfield else None!r}")
+    check("q is the only query parameter on the route",
+          len(_recall_route[0].dependant.query_params) == 1,
+          f"params: {[f.name for f in _recall_route[0].dependant.query_params]}")
+    _qm = {type(c).__name__: c for c in getattr(_qdef, "metadata", []) or []}
+    check("q is bounded at 200 characters in the schema",
+          getattr(_qm.get("MaxLen"), "max_length", None) == 200,
+          f"constraints: {_qm}")
+    check("a blank-only q is admitted by the schema and caught in the body",
+          getattr(_qm.get("MinLen"), "min_length", None) == 1,
+          f"constraints: {_qm}")
+    check("q is documented in the OpenAPI schema",
+          bool(getattr(_qdef, "description", None)),
+          f"description: {getattr(_qdef, 'description', None)!r}")
+    check("the schema bound is the shared constant, not a second literal",
+          getattr(_qm.get("MaxLen"), "max_length", None)
+          == hcl.RECALL_MAX_QUERY_CHARS,
+          f"schema={getattr(_qm.get('MaxLen'), 'max_length', None)} "
+          f"constant={hcl.RECALL_MAX_QUERY_CHARS}")
+
+    # --- UI ----------------------------------------------------------------
+    _app = (REPO_ROOT / "frontend" / "app.py").read_text()
+    check("the UI offers a memory question box",
+          "ss_recall_q" in _app and "Search memory" in _app,
+          "no recall input in the UI")
+    check("the UI states the slice is not the full timeline",
+          "not** the full" in _app or "not the full" in _app,
+          "the recall box does not distinguish itself from the strategic read")
+    check("the UI renders each result with its date and type",
+          "_s['date']" in _app and "_s['signal_type']" in _app,
+          "results are rendered without date or type")
+    check("the UI does not run summaries through markdown",
+          "unsafe_allow_html=False" in _app,
+          "stored summaries may be rendered as markdown/HTML")
+    check("the write key is not attached to reads",
+          "WRITE_HEADERS if method.upper() not in" in _app,
+          "the API key rides on GETs, widening its exposure")
+
+    # Teardown: the fixture bank and its registry entry are ours, not the
+    # suite's. Restoring the file rather than popping one key means a test that
+    # added several names cannot leave any of them behind. The assertions come
+    # AFTER the restore, because "the suite leaves the project as it found it"
+    # is the property worth proving.
+    _d.BANKS.pop(_bank, None)
+    _d.UNITS[:] = [u for u in _d.UNITS if u.get("bank_id") != _bank]
+    hcl._write_registry(_REG_BEFORE)
+    _seed_names = len(json.loads(
+        (REPO_ROOT / "data" / "seed_signals.json").read_text())["competitors"])
+    check("the recall fixture is not left in the double after teardown",
+          _bank not in _d.BANKS
+          and not [u for u in _d.UNITS if u["bank_id"] == _bank],
+          f"bank={_bank} still present")
+    check("the recall fixture is not left in data/competitors.json",
+          "recall-fixture" not in hcl._read_registry(),
+          f"got {sorted(hcl._read_registry())}")
+    check("the registry is restored to exactly its pre-section contents",
+          hcl._read_registry() == _REG_BEFORE,
+          f"before={sorted(_REG_BEFORE)} after={sorted(hcl._read_registry())}")
+    check("the restored registry holds exactly the real competitors",
+          len(hcl._read_registry()) == _seed_names,
+          f"got {len(hcl._read_registry())}, want {_seed_names}")
+
+
+def _auth_checks() -> None:
+    """Optional write auth, both modes.
+
+    The guard is called directly (it is a plain dependency that raises
+    HTTPException) and, separately, the routes are checked for actually
+    declaring it. Calling the helper alone would pass even if a route dropped
+    the dependency, which is the failure that matters, so both halves are
+    pinned. API_KEY is read at import time by routes.py, so both that binding
+    and config's are swapped per case.
+    """
+    import backend.config as cfg
+    from backend import routes as rt
+    from fastapi import HTTPException
+
+    def with_key(key: str):
+        real_cfg, real_rt = cfg.API_KEY, rt.API_KEY
+        cfg.API_KEY = rt.API_KEY = key
+
+        def restore() -> None:
+            cfg.API_KEY, rt.API_KEY = real_cfg, real_rt
+
+        return restore
+
+    def rejects(header) -> bool:
+        try:
+            rt.require_write_key(x_api_key=header)
+        except HTTPException as exc:
+            return exc.status_code == 401
+        return False
+
+    # --- API_KEY unset: unchanged behaviour, no header needed ------------
+    restore = with_key("")
+    try:
+        check("API_KEY unset: write with no header is allowed (unchanged behaviour)",
+              not rejects(None), "an unauthenticated write was refused")
+        check("API_KEY unset: write_auth_required() is False",
+              not cfg.write_auth_required(), "got True")
+        check("API_KEY unset: even a wrong header is allowed",
+              not rejects("anything"), "a header was rejected while disabled")
+    finally:
+        restore()
+
+    # --- API_KEY set: writes need the matching header ---------------------
+    KEY = "selftest-write-key"
+    restore = with_key(KEY)
+    try:
+        check("API_KEY set: write_auth_required() is True",
+              cfg.write_auth_required(), "got False")
+        check("API_KEY set: write with no header is 401",
+              rejects(None), "a missing key was allowed")
+        check("API_KEY set: write with an empty header is 401",
+              rejects(""), "an empty key was allowed")
+        check("API_KEY set: write with a wrong key is 401",
+              rejects("wrong-key"), "a wrong key was allowed")
+        check("API_KEY set: write with a key differing only in case is 401",
+              rejects(KEY.upper()), "a case-variant key was allowed")
+        check("API_KEY set: write with the correct key is allowed",
+              not rejects(KEY), "the correct key was refused")
+        check("API_KEY set: surrounding whitespace in the header is tolerated",
+              not rejects(f"  {KEY}  "), "a padded key was refused")
+    finally:
+        restore()
+
+    # The routes that write to Hindsight must actually declare the guard.
+    # This is the check that catches someone deleting `dependencies=[...]`.
+    guarded = set()
+    for route in rt.router.routes:
+        methods = getattr(route, "methods", set()) or set()
+        if "POST" not in methods:
+            continue
+        if any(getattr(d, "dependency", None) is rt.require_write_key
+               for d in (getattr(route, "dependencies", None) or [])):
+            guarded.add((route.path, "POST"))
+    check("POST /competitors declares the write guard",
+          ("/competitors", "POST") in guarded, f"guarded routes: {sorted(guarded)}")
+    check("POST /signals declares the write guard",
+          ("/signals", "POST") in guarded, f"guarded routes: {sorted(guarded)}")
+    # /signals/explicit is the seeder's structured write. It is left open on
+    # purpose (AUTOSEED and the offline double need it), and this pins that
+    # decision so it is a choice rather than an oversight. Revisit it before
+    # exposing a real deploy.
+    check("POST /signals/explicit is knowingly left unguarded (seeder path)",
+          ("/signals/explicit", "POST") not in guarded,
+          "it is now guarded; update this check and the docs together")
+
+    # The frontend sends the same variable name the backend reads, so setting
+    # it once on both services is the whole configuration story.
+    src = (REPO_ROOT / "frontend" / "app.py").read_text()
+    check("frontend reads API_KEY and sends it as X-API-Key",
+          'os.getenv("API_KEY")' in src and "X-API-Key" in src,
+          "frontend does not forward the write key")
+
+    # /demo/reset deletes every bank. It is the most destructive route in the
+    # app, so it must be behind the same write key as ingestion -- a demo
+    # convenience is not a good enough reason to let an open server wipe
+    # memory. In THIS process the flag is off (the suite does not set it), so
+    # the route is absent by design; the enabled-mode assertions below run it
+    # in a subprocess and check the wiring there.
+    check("POST /demo/reset is absent by default, not merely blocked",
+          not any(r.path == "/demo/reset" for r in rt.router.routes),
+          "the route is registered with the flag off")
+
+    # The UI must warn before it offers the button, and must not offer it on
+    # one click. A destructive control behind a single unconfirmed press is how
+    # a demo loses its data on stage.
+    check("the UI warns that logging a signal writes to the bank",
+          "writes to the seeded memory bank" in src,
+          "no warning about the write in the ingestion expander")
+    check("the UI offers a reset action",
+          "/demo/reset" in src, "no reset call in the UI")
+    check("the reset is behind an explicit confirmation, not one click",
+          "I understand this deletes all stored memory" in src,
+          "the destructive button is not gated")
+    check("the UI documents the offline reset command",
+          "scripts/seed_data.py --reset --verify" in src,
+          "the CLI reset path is not surfaced in the UI")
+    check("the UI hides the reset control unless the backend enables it",
+          "demo_reset_enabled" in src,
+          "the reset button is shown without asking the backend")
+
+    # The route must not merely refuse when disabled -- it must not exist.
+    # A present-but-403 endpoint invites retries with different parameters,
+    # and "not found" is the honest description of an absent capability.
+    # Asserted below over real HTTP, so the status code clients actually get
+    # is what is under test, not the route table.
+    import os as _os
+    import subprocess
+    import urllib.error
+    import urllib.request
+
+    def _routes_with(env: dict) -> list[str]:
+        code = (
+            "import sys; sys.path.insert(0,'.')\n"
+            "from backend import routes\n"
+            "print([r.path for r in routes.router.routes])\n"
+        )
+        _e = dict(_os.environ)
+        _e.update(env)
+        res = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, env=_e,
+        )
+        if res.returncode != 0:
+            return [f"ERROR: {res.stderr.strip().splitlines()[-1] if res.stderr else '?'}"]
+        return eval(res.stdout.strip().splitlines()[-1])
+
+    _off = _routes_with({"ENABLE_DEMO_RESET": "0"})
+    _on = _routes_with({"ENABLE_DEMO_RESET": "1"})
+    check("ENABLE_DEMO_RESET unset/0: POST /demo/reset does not exist (404)",
+          "/demo/reset" not in _off, f"routes: {_off}")
+    check("ENABLE_DEMO_RESET=1: POST /demo/reset is registered",
+          "/demo/reset" in _on, f"routes: {_on}")
+    check("the other routes are unaffected by the flag",
+          set(_off) == set(_on) - {"/demo/reset"},
+          f"off={sorted(_off)} on={sorted(_on)}")
+    check("the default is off with no env var at all",
+          "/demo/reset" not in _routes_with({}),
+          "the route exists without ENABLE_DEMO_RESET being set")
+
+    # Both gates, independently. The write key alone is not enough: with
+    # API_KEY unset (the local default) that check is a no-op, so a route
+    # guarded only by it is effectively unguarded in the default config.
+    _both = _routes_with({"ENABLE_DEMO_RESET": "1", "API_KEY": ""})
+    check("ENABLE_DEMO_RESET=1 with no API_KEY still registers the route",
+          "/demo/reset" in _both, f"routes: {_both}")
+
+    # End to end, over HTTP. A dedicated double on its own port keeps the
+    # suite's shared double untouched, and banks named competitor-alpha /
+    # competitor-beta cannot exist in any real account, so a passing delete
+    # is itself the proof that this path never left the loopback interface.
+    #
+    # BANKS is a module global, so a second serve() still reads the same dict:
+    # the state is snapshotted and restored below, otherwise these cases would
+    # quietly delete the fixtures that later checks in this same suite rely on.
+    _saved_banks = dict(double.BANKS)
+    _dbl = double.serve(0)
+    _DP = _dbl.server_address[1]
+    threading.Thread(target=_dbl.serve_forever, daemon=True).start()
+    _port = [8860]
+
+    def _seed_two() -> None:
+        double.BANKS.clear()
+        for _b in ("competitor-alpha", "competitor-beta"):
+            double.BANKS[_b] = {
+                "bank_id": _b, "name": _b, "facts": [],
+                "created_at": double._now(), "last_write_at": double._now(),
+                "enable_observations": True,
+            }
+
+    def _boot(flag: str, api_key: str):
+        _port[0] += 1
+        env = {
+            **_os.environ,
+            "HINDSIGHT_BASE_URL": f"http://127.0.0.1:{_DP}",
+            "HINDSIGHT_API_KEY": "double-key",
+            "GROQ_BASE_URL": f"http://127.0.0.1:{_DP}/v1/openai/v1",
+            "GROQ_API_KEY": "double-key",
+            "AUTOSEED": "0",
+            "ENABLE_DEMO_RESET": flag,
+            "API_KEY": api_key,
+        }
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1",
+             "--port", str(_port[0]), "--log-level", "warning"],
+            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        for _ in range(150):
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{_port[0]}/health", timeout=1).read()
+                return proc
+            except Exception:  # noqa: BLE001
+                time.sleep(0.2)
+        proc.kill()
+        raise SystemExit("selfcheck: uvicorn child did not boot")
+
+    def _post_reset(port: int, key: str | None):
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/demo/reset", data=b"{}", method="POST",
+            headers={"Content-Type": "application/json",
+                     **({"X-API-Key": key} if key else {})},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, r.read().decode()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read().decode()
+
+    def _get_health(port: int) -> dict:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=5) as r:
+            return json.loads(r.read())
+
+    try:
+        # Off: absent, so 404 and the banks are untouched.
+        _seed_two()
+        _p = _boot("0", "")
+        try:
+            _st, _body = _post_reset(_port[0], None)
+            _hf = _get_health(_port[0])
+            check("flag off over HTTP: POST /demo/reset is 404, not 401/403/200",
+                  _st == 404, f"got HTTP {_st} {_body[:80]}")
+            check("flag off over HTTP: /health reports the route unavailable",
+                  _hf.get("demo_reset_enabled") is False, f"health: {_hf}")
+        finally:
+            _p.kill(); _p.wait(); time.sleep(0.3)
+        check("flag off: nothing was deleted", sorted(double.BANKS) ==
+              ["competitor-alpha", "competitor-beta"], f"banks: {sorted(double.BANKS)}")
+
+        # On, no key configured: it works locally, and really deletes.
+        _seed_two()
+        _p = _boot("1", "")
+        try:
+            _st, _body = _post_reset(_port[0], None)
+            _hf = _get_health(_port[0])
+            _count = json.loads(_body).get("count") if _st == 200 else None
+            check("flag on, no key: POST /demo/reset is 200 and deletes the banks",
+                  _st == 200 and _count == 2 and not double.BANKS,
+                  f"HTTP {_st} count={_count} banks={sorted(double.BANKS)}")
+            check("flag on over HTTP: /health reports the route available",
+                  _hf.get("demo_reset_enabled") is True, f"health: {_hf}")
+        finally:
+            _p.kill(); _p.wait(); time.sleep(0.3)
+
+        # On, key configured, wrong key: the second gate still holds and the
+        # deletion does not happen.
+        _seed_two()
+        _p = _boot("1", "correct-key")
+        try:
+            _st, _body = _post_reset(_port[0], "wrong-key")
+            check("flag on, wrong key: POST /demo/reset is 401",
+                  _st == 401, f"got HTTP {_st} {_body[:80]}")
+        finally:
+            _p.kill(); _p.wait(); time.sleep(0.3)
+        check("flag on, wrong key: the banks survived the rejected call",
+              sorted(double.BANKS) == ["competitor-alpha", "competitor-beta"],
+              f"banks: {sorted(double.BANKS)}")
+
+        # And the correct key is accepted, so the 401 is the key and not a
+        # route that is simply broken.
+        _seed_two()
+        _p = _boot("1", "correct-key")
+        try:
+            _st, _body = _post_reset(_port[0], "correct-key")
+            check("flag on, correct key: POST /demo/reset is 200 and deletes",
+                  _st == 200 and not double.BANKS,
+                  f"HTTP {_st} {_body[:80]} banks={sorted(double.BANKS)}")
+        finally:
+            _p.kill(); _p.wait(); time.sleep(0.3)
+    finally:
+        _dbl.shutdown()
+        double.BANKS.clear()
+        double.BANKS.update(_saved_banks)
+
+    # /health advertises the capability, which is what the UI keys off.
+    check("HealthResponse exposes demo_reset_enabled",
+          "demo_reset_enabled" in (REPO_ROOT / "backend" / "models.py").read_text(),
+          "the flag is not in the health schema")
+    _health_src = (REPO_ROOT / "backend" / "routes.py").read_text()
+    check("the health handler reports the flag",
+          "demo_reset_enabled=ENABLE_DEMO_RESET" in _health_src,
+          "/health does not report demo_reset_enabled")
+
+    # The deploy default must be off, with the reason next to it.
+    _render = (REPO_ROOT / "render.yaml").read_text()
+    check("render.yaml ships ENABLE_DEMO_RESET=0",
+          re.search(r"ENABLE_DEMO_RESET\s*\n\s*value:\s*[\"']?0", _render) is not None,
+          "ENABLE_DEMO_RESET is not pinned to 0 in render.yaml")
+    check("render.yaml explains the flag is demo-only",
+          "throwaway demo" in _render or "demo-only" in _render,
+          "no rationale next to the flag")
+
+    # The enabled-but-keyless combination is the one where only a single gate
+    # is doing any work: the route exists and nothing is checking who is
+    # asking. It is allowed -- that is the local single-operator case -- but
+    # never silently, so bootstrap has to say so out loud.
+    def _boot_log(flag: str, api_key: str) -> str:
+        env = {**_os.environ,
+               "HINDSIGHT_BASE_URL": "http://127.0.0.1:9", "HINDSIGHT_API_KEY": "k",
+               "GROQ_API_KEY": "k", "AUTOSEED": "0",
+               "ENABLE_DEMO_RESET": flag, "API_KEY": api_key}
+        r = subprocess.run(
+            [sys.executable, "-c",
+             "import sys; sys.path.insert(0,'.')\n"
+             "from backend.main import bootstrap\n"
+             "bootstrap()\n"],
+            capture_output=True, text=True, env=env,
+        )
+        return r.stdout + r.stderr
+
+    _nokey = _boot_log("1", "")
+    check("reset enabled with no API_KEY warns that the route is unauthenticated",
+          "UNAUTHENTICATED" in _nokey and "/demo/reset" in _nokey,
+          f"bootstrap said: {_nokey[-260:]!r}")
+    check("that warning names the fix, not just the risk",
+          "API_KEY" in _nokey and "ENABLE_DEMO_RESET=0" in _nokey,
+          f"bootstrap said: {_nokey[-260:]!r}")
+    _withkey = _boot_log("1", "a-key")
+    check("reset enabled with a key also warns, naming the key-holding blast radius",
+          "write key" in _withkey,
+          f"bootstrap said: {_withkey[-260:]!r}")
+    _off_log = _boot_log("0", "a-key")
+    check("reset disabled logs no reset warning at all",
+          "/demo/reset" not in _off_log and "ENABLE_DEMO_RESET=1" not in _off_log,
+          f"bootstrap said: {_off_log[-260:]!r}")
+
+    # --reset has to mean "wipe the banks", not "delete the banks the seed file
+    # happens to mention". An earlier version iterated the seed file, so a
+    # bank created by anything else survived a command that printed "reset"
+    # and exited 0 -- which is how a stray probe bank stayed in a real
+    # account through a full reset. Run the real cmd_reset against the double
+    # with one seeded bank and one bank the seed file never mentions.
+    _seed_dirty = dict(double.BANKS)
+    _seeder_src = (REPO_ROOT / "scripts" / "seed_data.py").read_text()
+    check("cmd_reset lists banks instead of trusting the seed file",
+          "list_banks()" in _seeder_src.split("def cmd_reset")[1].split("def ")[0],
+          "cmd_reset does not enumerate existing banks")
+    check("cmd_reset names the banks it is about to delete that are not seeded",
+          "not in the seed file" in _seeder_src,
+          "stray banks are destroyed without being announced first")
+    _cd = subprocess.run(
+        [sys.executable, "-c",
+         "import sys; sys.path.insert(0,'.')\n"
+         "from backend.hindsight_client import bank_id_for\n"
+         "print(bank_id_for('Vertex Cloud'))\n"],
+        capture_output=True, text=True, env=dict(_os.environ),
+    )
+    _seeded_bank = _cd.stdout.strip().splitlines()[-1] if _cd.returncode == 0 else "?"
+    double.BANKS.clear()
+    double.BANKS[_seeded_bank] = {
+        "bank_id": _seeded_bank, "name": "Vertex Cloud", "facts": [],
+        "created_at": double._now(), "last_write_at": double._now(),
+        "enable_observations": True,
+    }
+    double.BANKS["competitor-curl-probe-co"] = {
+        "bank_id": "competitor-curl-probe-co", "name": "curl-probe-co", "facts": [],
+        "created_at": double._now(), "last_write_at": double._now(),
+        "enable_observations": True,
+    }
+    _grouped_stub = {"Vertex Cloud": []}
+    _reset_out = subprocess.run(
+        [sys.executable, "-c",
+         "import sys; sys.path.insert(0,'.')\n"
+         "import scripts.seed_data as sd\n"
+         "sd.cmd_reset({'Vertex Cloud': []})\n"],
+        capture_output=True, text=True,
+        env={**_os.environ, "HINDSIGHT_BASE_URL": BASE, "HINDSIGHT_API_KEY": "double-key"},
+    )
+    check("cmd_reset deletes a bank the seed file never mentions",
+          "competitor-curl-probe-co" not in double.BANKS,
+          f"banks left: {sorted(double.BANKS)} | {_reset_out.stdout[-200:]}"
+          f"{_reset_out.stderr[-200:]}")
+    check("cmd_reset still deletes the seeded banks", not double.BANKS,
+          f"banks left: {sorted(double.BANKS)}")
+    check("cmd_reset announces the stray bank before deleting it",
+          "competitor-curl-probe-co" in _reset_out.stdout
+          and "not in the seed file" in _reset_out.stdout,
+          f"stdout: {_reset_out.stdout[-240:]!r}")
+    double.BANKS.clear()
+    double.BANKS.update(_seed_dirty)
 
 
 if __name__ == "__main__":

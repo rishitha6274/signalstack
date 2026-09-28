@@ -55,6 +55,16 @@ log = logging.getLogger("signal_stack.hindsight")
 API_PREFIX = "/v1/default/banks"
 SIGNAL_TAG = "signal"
 
+# Recall is a question-answering lookup, not the analysis substrate, so its
+# result set is deliberately small. A user asking a question wants the handful
+# of signals that answer it; returning the whole bank would make the cap a lie
+# and quietly reintroduce the "just show me everything" path that recall was
+# added to avoid.
+RECALL_MAX_RESULTS = 10
+# The route validates this too; the client refuses an over-long query as well
+# so a caller bypassing HTTP cannot push an unbounded string at the API.
+RECALL_MAX_QUERY_CHARS = 200
+
 # Hindsight extracts facts from retained content. This mission keeps the
 # extraction honest: one dated signal in, one dated signal out, no merging,
 # no editorialising. Set on the bank so every future write inherits it.
@@ -427,6 +437,96 @@ class HindsightClient:
             by_uid.setdefault(signal.uid, signal)
 
         return sorted(by_uid.values(), key=lambda s: (s.date, s.signal_type))
+
+    def recall_signals(
+        self, competitor: str, query: str, limit: int = RECALL_MAX_RESULTS
+    ) -> list[Signal]:
+        """The signals most relevant to a free-text question. SECONDARY, never
+        the analysis substrate.
+
+        This is a question-answering lookup over one bank. It is deliberately
+        NOT a replacement for `get_timeline`, and the two are kept apart on
+        purpose: recall returns the k most semantically similar memories and
+        silently drops the rest, so feeding it to pattern detection would
+        analyse a biased sample of the timeline and report the bias as a
+        finding. Synthesis reads `get_timeline` only. Recall exists to answer
+        "what do I know about their pricing?", where missing the rest of the
+        timeline is not a correctness problem.
+
+        Scope, and why it is this narrow:
+          * `tags=[SIGNAL_TAG]` with `tags_match="all_strict"` -- the spec's
+            default is `any`, which *includes untagged rows*, so omitting the
+            match mode silently returns every derived observation in the bank
+            as if it were a signal. `all_strict` is the only mode that is
+            both AND and untagged-excluding.
+          * units without `metadata.signal_uid` are dropped, not rendered.
+            Hindsight derives extra facts from each document; those are real
+            memories but they are not signals, and presenting one as a dated
+            signal would invent history the user never logged.
+          * deduped by `signal_uid`, because one signal can produce several
+            recalled units and the answer to "what changed on the 12th" should
+            be one row, not three.
+
+        Verified against the published OpenAPI for 0.10.1 rather than assumed:
+        `RecallRequest` carries query/tags/tags_match/budget; `RecallResponse`
+        requires `results`; and each `RecallResult` has NO `date` field -- the
+        date is `occurred_start`/`mentioned_at`, with the authoritative value in
+        the `signal_date` metadata this app writes. `metadata` is typed
+        `additionalProperties: {type: string}`, so these are strings.
+        """
+        bank_id = bank_id_for(competitor)
+        body = {
+            "query": query,
+            "tags": [SIGNAL_TAG],
+            "tags_match": "all_strict",
+            "budget": "low",
+        }
+        # Raises HindsightNotFound for an unknown bank, which the route maps to
+        # a 404 rather than an empty list: "no such competitor" and "nothing
+        # matched" are different answers and must not look the same.
+        response = self._request(
+            "POST", f"{API_PREFIX}/{bank_id}/memories/recall", json_body=body
+        )
+
+        by_uid: dict[str, Signal] = {}
+        for unit in response.get("results") or []:
+            signal = self._recall_result_to_signal(unit, competitor)
+            if signal is None:
+                continue
+            by_uid.setdefault(signal.uid, signal)
+            if len(by_uid) >= limit:
+                break
+
+        # Oldest first, like the timeline, so recall results read in the same
+        # direction as everything else in the UI.
+        return sorted(by_uid.values(), key=lambda s: (s.date, s.signal_type))
+
+    @staticmethod
+    def _recall_result_to_signal(result: dict, competitor: str) -> Signal | None:
+        """Map one RecallResult back to a typed Signal, or None if it is not one.
+
+        Separate from `_unit_to_signal` because the two response shapes differ
+        in a way that matters: the list endpoint's items carry `date`, and
+        `RecallResult` does not. Falling back to `result["date"]` here would
+        raise KeyError on every real recall, so the date comes from the
+        metadata this app writes, then `occurred_start` (truncated to the day),
+        then the unit's own text.
+        """
+        metadata = result.get("metadata") or {}
+        if not metadata.get("signal_uid"):
+            return None  # a derived observation, not one of our signals
+        occurred = result.get("occurred_start") or result.get("mentioned_at") or ""
+        try:
+            return Signal(
+                competitor=metadata.get("competitor") or competitor,
+                date=metadata.get("signal_date") or occurred[:10],
+                signal_type=metadata.get("signal_type") or "feature",
+                summary=metadata.get("signal_summary") or (result.get("text") or "").strip(),
+                raw_notes=metadata.get("raw_notes", ""),
+                source=metadata.get("source", "manual entry"),
+            )
+        except Exception:  # a malformed row must not break the whole answer
+            return None
 
     def list_competitors(self) -> list[CompetitorOut]:
         """Every competitor with a memory bank, plus how much memory it holds.
