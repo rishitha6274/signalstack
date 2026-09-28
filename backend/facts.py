@@ -33,6 +33,22 @@ from .models import Signal
 # prompt and the validator cannot drift apart.
 GTM_TYPES: frozenset[str] = frozenset({"pricing", "hiring", "messaging", "funding"})
 
+# -- the evidence floor ----------------------------------------------------
+# Below this, a read is required to refuse; at or above it, a refusal is
+# rejected. Named constants rather than literals scattered through the
+# validators, so the rule has one home and one place to be wrong in.
+#
+# TUNED, NOT DERIVED. Five is the point that separates this corpus's designed
+# refusals (3-4 signals) from its designed forecasts (6+), so it is a reading
+# of ten synthetic competitors rather than a measured threshold. See the note
+# in `evidence_sufficient`.
+MIN_SIGNALS_FOR_EVIDENCE = 5
+# The longest gap may not exceed this multiple of the median. A count alone is
+# not enough: eight signals scattered across two years is not a rhythm, and the
+# old rule — "refuse when no transition pair repeats" — had nothing to say about
+# that case, so it waved it through into an unfounded forecast.
+MAX_INTERVAL_SPREAD = 3
+
 
 def parse_iso(value: str) -> date | None:
     try:
@@ -198,6 +214,71 @@ class TimelineFacts:
     def single_transitions(self) -> dict[tuple[str, str], int]:
         return {k: v for k, v in self.transitions.items() if v == 1}
 
+    # -- sufficiency: may this timeline be read at all? --------------------
+    @property
+    def interval_spread(self) -> float | None:
+        """Longest gap as a multiple of the median, or None if unknowable.
+
+        None rather than a large number when the rhythm cannot be measured —
+        fewer than two signals, or every signal on the same day. An unknown
+        spread is not a good spread, so callers treat it as failing the rule.
+        """
+        if not self.median_interval or self.max_interval is None:
+            return None
+        return self.max_interval / self.median_interval
+
+    @property
+    def evidence_sufficient(self) -> bool:
+        """Is there enough here for a strategic read, or must it be refused?
+
+        Sufficient means: at least `MIN_SIGNALS_FOR_EVIDENCE` signals, and a
+        rhythm tight enough that the longest gap is within
+        `MAX_INTERVAL_SPREAD` times the median.
+
+        This rule replaces "refuse when no transition type repeats", and the
+        reason it had to be replaced is that the old proxy was measuring the
+        wrong thing. Transition repetition is a property of the *vocabulary*,
+        not of the evidence: a competitor whose moves genuinely follow a
+        repeating shape will still show no repeated pair when its types happen
+        to vary, and a competitor with three signals will show no repeated pair
+        because three signals cannot contain one. In the live sweep that
+        mismatch cost two competent reads — Palisade (11 signals) and Ferrous
+        (6) both refused solely because no adjacent type pair recurred, and both
+        had timelines that support a forecast perfectly well. Meanwhile nothing
+        in the old rule stopped a confident forecast built on a timeline that
+        was merely long, so it spent its strictness in the wrong place.
+
+        Note the asymmetry this creates, which is deliberate. Below the floor a
+        refusal is the *only* accepted answer; at or above it a refusal is
+        rejected. Both directions are enforced in `validators`, and the FACTS
+        block states which side of the line this timeline falls on so the model
+        is never guessing.
+        """
+        if self.n < MIN_SIGNALS_FOR_EVIDENCE:
+            return False
+        spread = self.interval_spread
+        return spread is not None and spread <= MAX_INTERVAL_SPREAD
+
+    @property
+    def sufficiency_note(self) -> str:
+        """One clause saying which side of the line, and why. Shown in FACTS."""
+        if self.n < MIN_SIGNALS_FOR_EVIDENCE:
+            return (f"INSUFFICIENT — {self.n} signal(s), below the "
+                    f"{MIN_SIGNALS_FOR_EVIDENCE}-signal floor")
+        spread = self.interval_spread
+        if spread is None:
+            return (f"INSUFFICIENT — {self.n} signals, but the intervals cannot be "
+                    f"measured (all on the same day, or fewer than two signals), so "
+                    f"there is no rhythm to read")
+        if spread > MAX_INTERVAL_SPREAD:
+            return (f"INSUFFICIENT — {self.n} signals clears the "
+                    f"{MIN_SIGNALS_FOR_EVIDENCE}-signal floor, but the longest gap is "
+                    f"{self.max_interval}d against a {self.median_interval}d median "
+                    f"(spread {spread:.1f}x, above the {MAX_INTERVAL_SPREAD}x limit)")
+        return (f"SUFFICIENT — {self.n} signals (floor "
+                f"{MIN_SIGNALS_FOR_EVIDENCE}), longest gap {spread:.1f}x the "
+                f"{self.median_interval}d median (limit {MAX_INTERVAL_SPREAD}x)")
+
     # -- rendering ----------------------------------------------------------
     def render(self) -> str:
         """The FACTS block injected into the prompt.
@@ -255,6 +336,33 @@ class TimelineFacts:
                                      sorted(single.items()))
                 lines.append(f"- transitions seen only ONCE (say 'one observed instance', "
                              f"never 'repeating'/'a cycle'): {rendered}")
+
+        # Sufficiency, stated before the model reads anything else it would use
+        # to justify itself, and with the instruction that follows from it. The
+        # old block listed only "transitions seen only ONCE" and left the model
+        # to conclude that no licensable pattern meant no answer — which is how a
+        # well-evidenced competitor ended up refusing.
+        lines.append(f"- EVIDENCE SUFFICIENCY: {self.sufficiency_note}")
+        if self.evidence_sufficient:
+            lines.append(
+                "  You MUST produce a forecast. A refusal (\"confidence\": \"none\") is "
+                "REJECTED for this timeline — report a confidence of high, medium or "
+                "low instead."
+            )
+            if not self.repeated_transitions():
+                lines.append(
+                    "  REPEAT LANGUAGE: no transition type repeats here. Do not use "
+                    "\"repeats\", \"cycle\", \"loop\" or \"recurring\" for anything. "
+                    "\"missing_evidence\" MUST state that no transition has repeated, "
+                    "and \"confidence\" may not exceed \"medium\"."
+                )
+        else:
+            lines.append(
+                "  You MUST refuse: report \"confidence\": \"none\", say plainly in "
+                "\"predicted_next_move\" that no reliable prediction can be made, and "
+                "name in \"missing_evidence\" the specific signal that would change "
+                "that. A forecast is REJECTED for this timeline."
+            )
 
         if self.last_three:
             lines.append("- the three most recent signals, verbatim:")

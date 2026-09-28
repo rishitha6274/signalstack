@@ -625,7 +625,8 @@ def main() -> int:
 
     from backend import facts as _facts
     from backend import validators as _val
-    from backend.facts import build_facts
+    from backend.facts import (MAX_INTERVAL_SPREAD as _MAX_SPREAD,
+                                MIN_SIGNALS_FOR_EVIDENCE as _MIN_SIGNALS, build_facts)
     from backend.llm_client import (LLMError, RATE_LIMIT_DEFAULT_WAIT,
                                     RATE_LIMIT_MAX_WAIT, RateLimitError,
                                     _retry_after_seconds)
@@ -659,6 +660,23 @@ def main() -> int:
     }
     nimbus_facts = build_facts(_seed["Nimbus AI"], today=_TODAY)
     nimbus_tl = _timeline["Nimbus AI"]
+    # Palisade: 11 signals, nothing repeats. The case the old rule got wrong in
+    # both directions — ample evidence, no licensable repeat, and a forecast that
+    # should have been allowed at a capped confidence.
+    palisade_facts = build_facts(_seed["Palisade Security"], today=_TODAY)
+    # Six signals but wildly uneven: enough to clear the count floor, not enough
+    # to call a rhythm. Intervals of 10,10,10,91,10 give a 10-day median against a
+    # 91-day longest gap — a spread of 9.1x, well past the 3x limit. Built by hand
+    # rather than seeded so the spread does not drift if the corpus changes.
+    _erratic = [
+        Signal(competitor="Erratic Co", date=day, signal_type=kind, summary=f"Event {day}.")
+        for day, kind in [
+            ("2026-01-01", "feature"), ("2026-01-11", "messaging"),
+            ("2026-01-21", "pricing"), ("2026-01-31", "hiring"),
+            ("2026-05-01", "messaging"), ("2026-05-11", "feature"),
+        ]
+    ]
+    _erratic_facts = build_facts(_erratic, today=_TODAY)
 
     # -- A. repetition may only be claimed when a transition repeats --------
     check("A: Nimbus has exactly one repeating transition (feature -> hiring x2)",
@@ -709,6 +727,14 @@ def main() -> int:
     acknowledged = {
         **PRE_FIX,
         "confidence": "low",
+        # The pre-fix "cycle repeats three times" claim is gone, and in its place
+        # this names the one transition the FACTS block actually prices. Both
+        # halves matter: the claim had to be withdrawn, and the withdrawn claim
+        # replaced by the truth rather than by vagueness.
+        "patterns": (
+            "Pricing cuts consistently precede tier launches, and feature->hiring "
+            "is the one transition that has occurred twice."
+        ),
         "predicted_next_move": (
             "The stream has been quiet for 26 day(s) past its 14-day rhythm and no "
             "signal has arrived since 2026-08-19, so timing is a projection: a "
@@ -931,19 +957,26 @@ def main() -> int:
         "confidence": "none",
         "missing_evidence": "A fifth signal showing a repeat of any transition.",
     }
+    # This fixture is a refusal for a four-signal timeline, so it is checked
+    # against one. It used to be checked against Nimbus (12 signals) and passed
+    # there, which the evidence floor would not allow: a refusal on a timeline
+    # that supports a read is not a well-formed refusal, it is an unwarranted
+    # one, and D2 asserts that it is now rejected.
+    _refusal_facts = build_facts(_seed["Vertex Cloud"], today=_TODAY)
+    _refusal_tl = _timeline["Vertex Cloud"]
     check("D: a well-formed refusal passes (exempt from interval and quote checks)",
-          _val.validate_response(refusal, nimbus_facts, nimbus_tl, refused=True) == [],
-          _val.validate_response(refusal, nimbus_facts, nimbus_tl, refused=True))
+          _val.validate_response(refusal, _refusal_facts, _refusal_tl, refused=True) == [],
+          _val.validate_response(refusal, _refusal_facts, _refusal_tl, refused=True))
     check("D: a refusal that claims confidence is rejected",
           any("refusal" in p for p in
-              _val.validate_response({**refusal, "confidence": "medium"}, nimbus_facts,
-                                     nimbus_tl, refused=True)),
+              _val.validate_response({**refusal, "confidence": "medium"}, _refusal_facts,
+                                     _refusal_tl, refused=True)),
           "a mid-confidence refusal passed")
     check("D: a refusal missing its missing_evidence sentence is rejected",
           any("missing_evidence" in p for p in
               _val.validate_response({k: v for k, v in refusal.items()
                                       if k != "missing_evidence"},
-                                     nimbus_facts, nimbus_tl, refused=True)),
+                                     _refusal_facts, _refusal_tl, refused=True)),
           "a refusal with no named observation passed")
     check("D: refusal is decided by the confidence field and nothing else",
           _is_refusal({**PRE_FIX, "confidence": "none"})
@@ -963,23 +996,143 @@ def main() -> int:
                            "confidence": "None of these observations support a "
                                          "cadence, but the feature/hiring pairing is real."}),
           "an English 'none' inside the confidence field became a refusal")
-    check("D: a refusal keeps the exemption and still owes its calibration",
-          # The exemption is real: a refusal is not asked to forecast.
-          not _val.validate_response(
-              {"patterns": "No transition repeats.", "inferred_intent": "None.",
+    _exempt = {"patterns": "No transition repeats.", "inferred_intent": "None.",
                "predicted_next_move": "No reliable prediction can be made.",
                "recommendation": "Keep collecting signals.",
                "confidence": "none",
-               "missing_evidence": "A second occurrence of any transition."},
-              nimbus_facts, nimbus_tl, refused=True)
+               "missing_evidence": "A second occurrence of any transition."}
+    _four_signal = build_facts(_seed["Vertex Cloud"], today=_TODAY)
+    check("D: a refusal keeps the exemption and still owes its calibration",
+          # The exemption is real: a refusal is not asked to forecast. Tested on
+          # a timeline where refusing is warranted — the evidence floor added in
+          # D2, so the exemption now has a precondition it did not use to have.
+          not _val.validate_response(
+              _exempt, _four_signal, _timeline["Vertex Cloud"], refused=True)
           # and it is not an exemption from saying how sure it is.
           and _val.validate_response(
-              {"patterns": "No transition repeats.", "inferred_intent": "None.",
-               "predicted_next_move": "No reliable prediction can be made.",
-               "recommendation": "Keep collecting signals.",
-               "confidence": "none"},
-              nimbus_facts, nimbus_tl, refused=True) == ["missing_evidence is absent"],
+              {k: v for k, v in _exempt.items() if k != "missing_evidence"},
+              _four_signal, _timeline["Vertex Cloud"], refused=True)
+          == ["missing_evidence is absent"],
           "the refusal branch is not holding refusals to the calibration rules")
+
+    # -- D2. the evidence floor decides whether a refusal is available -----
+    # The rule that replaced "refuse when no transition repeats". Four cases,
+    # each of which the old proxy got wrong or could not express.
+    _vertex_facts = build_facts(_seed["Vertex Cloud"], today=_TODAY)
+    _pathfinder_facts = build_facts(_seed["Pathfinder Labs"], today=_TODAY)
+    check("D2: the floor splits the corpus exactly as designed",
+          {n for n in _seed if not build_facts(_seed[n], today=_TODAY).evidence_sufficient}
+          == {"Pathfinder Labs", "Tidewater Analytics", "Vertex Cloud"},
+          "the floor does not put exactly the three designed refusals below it")
+    check("D2: three signals are insufficient however even their spacing",
+          not _pathfinder_facts.evidence_sufficient
+          and _pathfinder_facts.interval_spread is not None
+          and _pathfinder_facts.interval_spread <= _MAX_SPREAD,
+          "a count below the floor was waved through")
+    check("D2: the signal floor is 5, so 4 refuses and 5 forecasts",
+          not _vertex_facts.evidence_sufficient
+          and build_facts([*_seed["Vertex Cloud"],
+                           Signal(competitor="Vertex Cloud", date="2026-09-27",
+                                  signal_type="feature", summary="A fifth signal.")],
+                          today=_TODAY).evidence_sufficient,
+          "the floor is not where it is documented to be")
+    check("D2: enough signals but no rhythm is still insufficient",
+          not _erratic_facts.evidence_sufficient
+          and _erratic_facts.n >= _MIN_SIGNALS
+          and _erratic_facts.interval_spread > _MAX_SPREAD,
+          f"a spread of {_erratic_facts.interval_spread} was treated as a rhythm")
+    check("D2: an unmeasurable rhythm counts as insufficient, not as fine",
+          not build_facts([Signal(competitor="Same Day Co", date="2026-08-01",
+                                  signal_type=t, summary="x") for t in
+                           ("feature", "hiring", "pricing", "messaging", "feature")],
+                          today=_TODAY).evidence_sufficient,
+          "a zero-length rhythm was read as a perfect one")
+
+    # Below the floor the only accepted answer is a refusal.
+    check("D2: below the floor a forecast is rejected and told to refuse",
+          any("must be 'none'" in p for p in
+              _val.validate_response({**PRE_FIX, "confidence": "low"},
+                                     _vertex_facts, _timeline["Vertex Cloud"])),
+          "a forecast survived on a timeline with 4 signals")
+    check("D2: below the floor a refusal is accepted",
+          not _val.validate_response(
+              {**PRE_FIX, "confidence": "none",
+               "missing_evidence": "A second signal would show whether this is a stream."},
+              _vertex_facts, _timeline["Vertex Cloud"], refused=True),
+          "a warranted refusal was rejected")
+    # Above the floor the only rejected answer is a refusal.
+    check("D2: a refusal above the floor is rejected",
+          any("refusal" in p and "REJECTED" not in p for p in
+              _val.validate_response(
+                  {**PRE_FIX, "confidence": "none",
+                   "missing_evidence": "No transition has repeated, so nothing more "
+                                       "is needed."},
+                  palisade_facts, _timeline["Palisade Security"], refused=True)),
+          "an unwarranted refusal on 11 signals was accepted")
+    check("D2: the rejection names the sufficiency that forbids it",
+          any(palisade_facts.sufficiency_note in p for p in
+              _val.validate_response(
+                  {**PRE_FIX, "confidence": "none",
+                   "missing_evidence": "Nothing."},
+                  palisade_facts, _timeline["Palisade Security"], refused=True)),
+          "the refusal rejection does not tell the model why it is refused")
+
+    # Sufficient but nothing repeats: capped at medium, no repeat language, and
+    # the absence has to be disclosed.
+    _no_repeat = {**PRE_FIX, "confidence": "medium",
+                  "missing_evidence": "No transition has repeated yet; a second "
+                                      "feature->hiring would be the first repeat."}
+    check("D2: with nothing repeating, 'medium' is accepted and 'high' is not",
+          not _val.check_confidence_allowed(_no_repeat, palisade_facts, refused=False)
+          and any("medium" in p for p in _val.check_confidence_allowed(
+              {**_no_repeat, "confidence": "high"}, palisade_facts, refused=False)),
+          "the medium cap is not enforced when nothing repeats")
+    check("D2: where something does repeat, 'high' is allowed again",
+          not _val.check_confidence_allowed(
+              {**_no_repeat, "confidence": "high"}, nimbus_facts, refused=False),
+          "the cap leaked onto timelines that do have a repeat")
+    check("D2: a read must disclose that nothing has repeated",
+          any("no transition type has repeated" in p.lower() for p in
+              _val.check_no_repeat_disclosure(
+                  {**_no_repeat, "missing_evidence": "Another quarter of data."},
+                  palisade_facts)),
+          "a read could omit the non-repetition entirely")
+    check("D2: saying nothing has repeated satisfies the disclosure",
+          not _val.check_no_repeat_disclosure(_no_repeat, palisade_facts),
+          "a compliant disclosure was rejected")
+    check("D2: repeat language with nothing priced is rejected",
+          any("no transition type repeating" in p for p in _val.check_repeat_language(
+              {**_no_repeat,
+               "patterns": "Their feature->hiring cycle repeats every quarter."},
+              palisade_facts)),
+          "an unpriced cycle claim was accepted")
+    check("D2: denying a repeat is not claiming one",
+          not _val.check_repeat_language(
+              {"patterns": "No transition repeats, so the shape is provisional.",
+               "inferred_intent": "None yet.",
+               "predicted_next_move": "Another feature, probably.",
+               "recommendation": "Watch for a second hiring signal."},
+              palisade_facts),
+          "a disclosure of non-repetition was read as a repeat claim")
+    check("D2: naming a priced transition licenses the word",
+          not _val.check_repeat_language(
+              {"patterns": "feature->hiring repeats: it occurred twice.",
+               "inferred_intent": "Hiring follows feature.",
+               "predicted_next_move": "Another feature, probably.",
+               "recommendation": "Watch."}, nimbus_facts),
+          "a licensed repeat claim was rejected")
+    check("D2: repeat language naming nothing priced is rejected even when "
+          "something repeats",
+          any("must name a transition" in p for p in _val.check_repeat_language(
+              {"patterns": "The cycle repeats.", "inferred_intent": "x",
+               "predicted_next_move": "y", "recommendation": "z"}, nimbus_facts)),
+          "an unbacked repeat claim slipped through")
+    check("D2: the FACTS block states sufficiency, and which way it goes",
+          "EVIDENCE SUFFICIENCY: SUFFICIENT" in palisade_facts.render()
+          and "You MUST produce a forecast" in palisade_facts.render()
+          and "EVIDENCE SUFFICIENCY: INSUFFICIENT" in _vertex_facts.render()
+          and "You MUST refuse" in _vertex_facts.render(),
+          "the FACTS block does not tell the model which side of the line it is on")
 
     # -- E. every stated interval must be one the FACTS block supports -------
     check("E: Lumen's real intervals are 21-36 days, median 26",
@@ -1121,51 +1274,63 @@ def main() -> int:
         ["interval claim '14 days' does not correspond to any measured interval"],
         nimbus_facts)
 
-    def _notice_contract(notice: str) -> tuple[set[str], str | None]:
-        """What the notice tells the model to write, read the way the validator would.
+    def _notice_values(notice: str) -> set[str]:
+        """The confidence values the rendered notice actually tells the model to use.
 
-        Returns (values for a forecast, value for a refusal). The notice explains
-        both branches, because a rejected response may be either, and that is
-        correct — the defect was not mentioning both, it was instructing a
-        refusal to use the forecast branch's values.
+        Read out of the text rather than out of the function that produced it,
+        so this is a real check and not a tautology. Only the list is read, up to
+        the first full stop: the rest of the line discusses the value it is
+        *refusing*, which is not an offer.
         """
-        _graded = re.search(
-            r'"confidence" must be one of ([a-z/]+) if you make a forecast', notice)
-        _refusal = re.search(
-            r'decline to forecast.*?"confidence" must be [\'"]?(\w+)', notice, re.S)
-        return (set(re.findall(r"high|medium|low", _graded.group(1))) if _graded
-                else set(),
-                _refusal.group(1) if _refusal else None)
+        line = re.search(r'^CONFIDENCE: report "confidence" as one of: ([^.]*)\.',
+                         notice, re.M)
+        if not line:
+            return set()
+        return set(re.findall(r"\b(none|high|medium|low)\b", line.group(1)))
 
-    _graded_vals, _refusal_val = _notice_contract(_refusal_notice)
-    check("notice: the refusal branch names the value the validator demands",
-          _refusal_val == "none"
-          and _val.allowed_confidence_values(refused=True) == ("none",),
-          f"the notice tells a refusal to report {_refusal_val!r}, while the "
-          f"validator accepts only {_val.allowed_confidence_values(refused=True)}")
-    check("notice: the forecast branch names exactly the graded values",
-          _graded_vals == set(_val.allowed_confidence_values(refused=False))
-          == {"high", "medium", "low"},
-          f"the notice offers {sorted(_graded_vals)} for a forecast, while the "
-          f"validator accepts only {sorted(_val.allowed_confidence_values(False))}")
-    check("notice: neither branch is stated unconditionally",
-          re.search(r'"confidence" must be one of (?:high|medium|low)'
-                    r'(?![a-z/])(?! if you make a forecast)',
-                    _refusal_notice) is None,
-          "the notice states a confidence requirement without its condition")
-    # The two notices the model can receive must not disagree, whichever
-    # complaint triggered them. Before the fix they did.
-    check("notice: the contract does not depend on which complaint triggered it",
-          _notice_contract(_refusal_notice) == _notice_contract(_forecast_notice),
+    # The notice and the validator must not disagree, for any case. Checked
+    # behaviourally: every value the notice offers is accepted by the validator,
+    # and every value it omits is rejected — so "disagree" cannot survive even
+    # if both texts were mangled the same way.
+    _cases = [
+        ("sufficient, some transition repeats", nimbus_facts),
+        ("sufficient, nothing repeats", palisade_facts),
+        ("insufficient, below the floor", build_facts(_seed["Vertex Cloud"],
+                                                      today=_TODAY)),
+        ("insufficient, rhythm too erratic", _erratic_facts),
+    ]
+    for _label, _case in _cases:
+        _notice = _correction_notice(["something was wrong"], _case)
+        _offered = _notice_values(_notice)
+        check(f"notice: offers exactly the validator's values ({_label})",
+              _offered == set(_val.allowed_confidence_values(_case, refused=False)),
+              f"the notice offers {sorted(_offered)}; the validator accepts "
+              f"{sorted(_val.allowed_confidence_values(_case, refused=False))}")
+        _mismatched = []
+        for _value in ("none", "high", "medium", "low"):
+            _resp = {**PRE_FIX, "confidence": _value,
+                     "missing_evidence": "A second feature->hiring would be the "
+                                         "first repeat; nothing has repeated yet."}
+            _accepted = not _val.check_confidence_allowed(
+                _resp, _case, refused=(_value == "none"))
+            if _accepted != (_value in _offered):
+                _mismatched.append(_value)
+        check(f"notice: every offered value is accepted and every other rejected "
+              f"({_label})",
+              not _mismatched,
+              f"the notice and the validator disagree about {_mismatched}")
+    # A rejection for one reason must not change the advice given for another:
+    # the contract follows the timeline, and only the timeline.
+    check("notice: the contract depends on the timeline, not the complaint",
+          _notice_values(_forecast_notice) == _notice_values(
+              _correction_notice(["an unrelated complaint"], nimbus_facts)),
           "the confidence contract changes with the problem being reported")
-    # And the end-to-end claim: each branch of the notice, followed exactly,
-    # produces a response the validator accepts for that branch. Before the fix
-    # the refusal branch produced a rejection, then a second rejection. The
-    # forecast branch is exercised on `acknowledged`, the response that already
-    # passes every other rule, so only the confidence is under test.
-    _refusal_read = {**PRE_FIX, "confidence": _refusal_val or "low",
+    check("notice: a below-the-floor timeline is told something different",
+          _notice_values(_refusal_notice) != _notice_values(_forecast_notice),
+          "the two timelines are being given the same contract")
+    _refusal_read = {**PRE_FIX, "confidence": "none",
                      "missing_evidence": "A named retention deal would settle it."}
-    check("notice: a refusal written to the notice passes the validator",
+    check("notice: a refusal written to the notice passes the validator below the floor",
           not _val.validate_response(_refusal_read,
                                      build_facts(_seed["Vertex Cloud"], today=_TODAY),
                                      _timeline["Vertex Cloud"], refused=True),
@@ -1181,9 +1346,9 @@ def main() -> int:
                        {**acknowledged, "confidence": level}, nimbus_facts, nimbus_tl)
                        if "confidence" in p]}
     check("notice: every graded level the validator would accept is one it names",
-          _acceptable and _acceptable <= _graded_vals,
+          _acceptable and _acceptable <= _notice_values(_forecast_notice),
           f"the validator accepts {sorted(_acceptable)} but the notice names "
-          f"{sorted(_graded_vals)}")
+          f"{sorted(_notice_values(_forecast_notice))}")
     check("notice: a forecast written to the notice passes the validator",
           all(not _val.validate_response({**acknowledged, "confidence": level},
                                          nimbus_facts, nimbus_tl)
@@ -1193,13 +1358,13 @@ def main() -> int:
           (nimbus_facts.days_overdue <= 0)
           or ('must not be "high"' in _forecast_notice),
           "the notice omits the overdue confidence cap")
-    check("notice: a graded confidence is still rejected for a refusal",
-          any("refusal must report confidence" in p
-              for p in _val.validate_response({**_refusal_read, "confidence": "low"},
-                                              build_facts(_seed["Vertex Cloud"],
-                                                          today=_TODAY),
-                                              _timeline["Vertex Cloud"], refused=True)),
-          "the refusal rule was dropped rather than the notice being fixed")
+    check("notice: a forecast below the floor is rejected, not merely unnamed",
+          any("must be 'none'" in p
+              for p in _val.validate_response(
+                  {**_refusal_read, "confidence": "low"},
+                  build_facts(_seed["Vertex Cloud"], today=_TODAY),
+                  _timeline["Vertex Cloud"])),
+          "the below-the-floor rule was dropped rather than the notice being fixed")
 
     # -- defect 2: retries must converge -------------------------------------
     # Lumen's retry fixed the overdue complaint and wrote a different wrong
@@ -1545,12 +1710,11 @@ def main() -> int:
         "D: removing the refusal-confidence rule",
         lambda: _stack(validators=_mutant_from(
             "backend.validators",
-            replacements=[('    if str(response.get("confidence") or "")'
-                           '.strip().lower() not in required:', "    if False:")])),
-        lambda m: any("refusal must report confidence" in p for p in
-                      m["val"].validate_response({**refusal, "confidence": "medium"},
-                                                 m["F"](_seed["Nimbus AI"]),
-                                                 nimbus_tl, refused=True)),
+            replacements=[("    if value not in allowed:", "    if False:  # MUTANT")])),
+        lambda m: any("must be one of" in p for p in
+                      m["val"].check_confidence_allowed(
+                          {**refusal, "confidence": "high"},
+                          palisade_facts, refused=False)),
     )
     _mutates(
         "D: deciding refusal from the prose again",
@@ -1689,20 +1853,19 @@ def main() -> int:
         "defect 1: letting a refusal report high/medium/low again",
         lambda: _stack(validators=_mutant_from(
             "backend.validators",
-            replacements=[('    return ("none",) if refused else ("high", "medium", "low")',
-                           '    return ("high", "medium", "low")  # MUTANT')])),
-        lambda m: not m["val"].check_refusal_calibrated(
-            {**PRE_FIX, "confidence": "none", "missing_evidence": "A deal settles it."},
-            m["F"](_seed["Vertex Cloud"])),
+            replacements=[('    if not facts.evidence_sufficient:\n        return ("none",)',
+                           '    if False:\n        return ("none",)  # MUTANT')])),
+        lambda m: m["val"].allowed_confidence_values(
+            m["F"](_seed["Vertex Cloud"]), refused=True) == ("none",),
     )
     _mutates(
         "defect 1: the notice asking the wrong end of the contract",
         lambda: _stack(synthesis=_mutant_from(
             "backend.synthesis",
-            replacements=[('    forecast = "/".join(validators.allowed_confidence_values('
-                           "refused=False))",
-                           '    forecast = "/".join(validators.allowed_confidence_values('
-                           "refused=True))  # MUTANT: wrong end")])),
+            replacements=[("    forecast_values = validators.allowed_confidence_values("
+                           "facts, refused=False)",
+                           "    forecast_values = validators.allowed_confidence_values("
+                           "facts, refused=True)  # MUTANT: wrong end")])),
         lambda m: all(v in
                       m["syn"]._correction_notice(["x"], m["F"](_seed["Nimbus AI"]))
                       for v in ("high", "medium", "low")),
@@ -1855,6 +2018,108 @@ def main() -> int:
             replacements=[("RATE_LIMIT_DEFAULT_WAIT = 20.0",
                            "RATE_LIMIT_DEFAULT_WAIT = 0.4")])),
         lambda m: m["llm"].RATE_LIMIT_DEFAULT_WAIT >= 10,
+    )
+
+    # -- D2 mutations: one per rule in the evidence floor -------------------
+    # Each deletes exactly one clause of the new contract, so a rule that stops
+    # being enforced is caught by the check that quotes it.
+    _mutates(
+        "D2: deleting the signal floor",
+        lambda: _stack(facts_mod=_mutant_from(
+            "backend.facts",
+            replacements=[("MIN_SIGNALS_FOR_EVIDENCE = 5",
+                           "MIN_SIGNALS_FOR_EVIDENCE = 0  # MUTANT")])),
+        lambda m: not m["F"](_seed["Vertex Cloud"]).evidence_sufficient,
+    )
+    _mutates(
+        "D2: deleting the dispersion guard",
+        lambda: _stack(facts_mod=_mutant_from(
+            "backend.facts",
+            replacements=[("MAX_INTERVAL_SPREAD = 3",
+                           "MAX_INTERVAL_SPREAD = 10000  # MUTANT")])),
+        lambda m: not m["F"](_erratic).evidence_sufficient,
+    )
+    _mutates(
+        "D2: treating an unmeasurable rhythm as sufficient",
+        lambda: _stack(facts_mod=_mutant_from(
+            "backend.facts",
+            replacements=[("        return spread is not None and spread <= MAX_INTERVAL_SPREAD",
+                           "        return spread is None or spread <= MAX_INTERVAL_SPREAD  # MUTANT")])),
+        lambda m: not m["F"]([Signal(competitor="Same Day Co", date="2026-08-01",
+                                      signal_type=t, summary="x") for t in
+                               ("feature", "hiring", "pricing", "messaging",
+                                "feature")]).evidence_sufficient,
+    )
+    _mutates(
+        "D2: letting an unwarranted refusal through",
+        lambda: _stack(validators=_mutant_from(
+            "backend.validators",
+            replacements=[('    if refused:\n        problems.append(\n'
+                           '            f"the FACTS block records this evidence as '
+                           '{facts.sufficiency_note}, so a "',
+                           '    if False:  # MUTANT\n        problems.append(\n'
+                           '            f"the FACTS block records this evidence as '
+                           '{facts.sufficiency_note}, so a "')])),
+        # The clause's job is to say that refusing is not available, not merely
+        # that "none" is the wrong number: without it the model is still
+        # rejected, but with a message that leaves it guessing which way to move.
+        lambda m: any("a refusal" in p and "rejected" in p for p in
+                      m["val"].check_confidence_allowed(
+                          {"confidence": "none", "missing_evidence": "Nothing."},
+                          palisade_facts, refused=True)),
+    )
+    _mutates(
+        "D2: lifting the medium cap when nothing repeats",
+        lambda: _stack(validators=_mutant_from(
+            "backend.validators",
+            replacements=[("    if not facts.repeated_transitions():\n"
+                           '        return ("medium", "low")',
+                           "    if False:  # MUTANT\n"
+                           '        return ("medium", "low")')])),
+        lambda m: bool(m["val"].check_confidence_allowed(
+            {"confidence": "high", "missing_evidence": "No transition has repeated."},
+            palisade_facts, refused=False)),
+    )
+    _mutates(
+        "D2: dropping the no-repeat disclosure",
+        lambda: _stack(validators=_mutant_from(
+            "backend.validators",
+            replacements=[("    if not facts.evidence_sufficient or facts.repeated_transitions():\n"
+                           "        return []",
+                           "    if True:  # MUTANT\n        return []")])),
+        lambda m: bool(m["val"].check_no_repeat_disclosure(
+            {"missing_evidence": "Another quarter of data."}, palisade_facts)),
+    )
+    _mutates(
+        "D2: dropping the repeat-language rule",
+        lambda: _stack(validators=_mutant_from(
+            "backend.validators",
+            replacements=[("    claimed = _unnegated_repeat_words(text)",
+                           "    claimed = []  # MUTANT")])),
+        lambda m: bool(m["val"].check_repeat_language(
+            {"patterns": "Their feature->hiring cycle repeats every quarter."},
+            palisade_facts)),
+    )
+    _mutates(
+        "D2: removing sufficiency from the FACTS block",
+        lambda: _stack(facts_mod=_mutant_from(
+            "backend.facts",
+            replacements=[('        lines.append(f"- EVIDENCE SUFFICIENCY: {self.sufficiency_note}")',
+                           "        pass  # MUTANT")])),
+        lambda m: "EVIDENCE SUFFICIENCY" in m["F"](_seed["Vertex Cloud"]).render(),
+    )
+    _mutates(
+        "D2: the notice withholding the rule from the retry",
+        lambda: _stack(synthesis=_mutant_from(
+            "backend.synthesis",
+            replacements=[('    if not facts.repeated_transitions():\n'
+                           '            lines.append(\n'
+                           '                "No transition type repeats in this timeline',
+                           '    if False:  # MUTANT\n'
+                           '            lines.append(\n'
+                           '                "No transition type repeats in this timeline')])),
+        lambda m: "No transition type repeats" in
+        m["syn"]._correction_notice(["x"], m["F"](_seed["Palisade Security"])),
     )
 
     # A floor, not an exact count: the point is that a mutation which fails to

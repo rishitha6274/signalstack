@@ -394,20 +394,38 @@ def _correction_notice(problems: list[str], facts) -> str:
                 "patterns — say 'one observed instance'): "
                 + ", ".join(f"{a}->{b}" for a, b in sorted(single.items()))
             )
-    forecast = "/".join(validators.allowed_confidence_values(refused=False))
+    sufficient = facts.evidence_sufficient
+    forecast_values = validators.allowed_confidence_values(facts, refused=False)
+    listed = ", ".join(forecast_values)
+    if sufficient:
+        lines.append(
+            f"CONFIDENCE: report \"confidence\" as one of: {listed}. The FACTS block "
+            f"records this evidence as {facts.sufficiency_note}, so a refusal "
+            f"(\"confidence\": \"none\") is REJECTED — forecast."
+        )
+        if not facts.repeated_transitions():
+            lines.append(
+                "No transition type repeats in this timeline, so do not use "
+                "\"repeats\", \"cycle\", \"loop\" or \"recurring\" for anything. Say "
+                "\"one observed instance\" instead, and make \"missing_evidence\" state "
+                "that no transition has repeated. \"medium\" is the ceiling here."
+            )
+    else:
+        lines.append(
+            f"CONFIDENCE: report \"confidence\" as one of: {listed}. The FACTS block "
+            f"records this evidence as {facts.sufficiency_note}, so you must refuse: "
+            f"say plainly in \"predicted_next_move\" that no reliable prediction can be "
+            f"made, and name in \"missing_evidence\" the specific signal that would change "
+            f"that. A forecast is REJECTED."
+        )
     lines.append(
-        f"Every predicted date must be after "
-        f"{facts.today.isoformat()}. You must include both \"confidence\" and "
-        f"\"missing_evidence\" (one sentence naming the specific observation that "
-        f"would most raise your confidence). \"confidence\" must be one of "
-        f"{forecast} if you make a forecast. If you decline to forecast, say so in "
-        f"\"predicted_next_move\", and then \"confidence\" must be "
-        f"{validators.allowed_confidence_values(refused=True)[0]!r} — a refusal "
-        f"reported as anything other than that is rejected. A forecast you stand "
-        f"behind and a refusal you state plainly are both acceptable; the rejected "
-        f"answer is the one that hedges without committing either way."
+        f"Every predicted date must be after {facts.today.isoformat()}. You must "
+        f"include both \"confidence\" and \"missing_evidence\" (one sentence naming the "
+        f"specific observation that would most raise your confidence). "
+        f"\"missing_evidence\" names the thing you still need, not the absence of "
+        f"confidence."
     )
-    if facts.days_overdue > 0:
+    if sufficient and facts.days_overdue > 0:
         lines.append(
             f"The stream is {facts.days_overdue} day(s) overdue. Your "
             f"\"predicted_next_move\" must say so, and \"confidence\" must not be \"high\"."

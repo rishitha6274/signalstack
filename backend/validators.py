@@ -171,7 +171,7 @@ def _as_date(match: re.Match) -> date | None:
     return None
 
 
-def allowed_confidence_values(refused: bool) -> tuple[str, ...]:
+def allowed_confidence_values(facts, refused: bool) -> tuple[str, ...]:
     """The confidence values a response may report, for this case.
 
     The single source of truth for the calibration contract. `synthesis.py` builds
@@ -182,8 +182,66 @@ def allowed_confidence_values(refused: bool) -> tuple[str, ...]:
     told to report one of the three, and rejected again on the retry. A live run
     lost two reads to exactly that, and a third to a refusal the notice had
     provoked. Two copies of a rule is one copy too many.
+
+    Three cases, and the empty tuple is the important one:
+
+    - Evidence insufficient: "none" is the only accepted value. A forecast is
+      not a worse answer here, it is the wrong answer.
+    - Evidence sufficient and the response refuses: nothing is accepted. The
+      refusal is rejected outright, because the timeline supports a read and
+      declining to make one is not a finding. This is the case the old rule had
+      no way to express, since it only ever licensed refusals.
+    - Evidence sufficient and the response forecasts: high/medium/low, capped at
+      medium when no transition repeats, because a read that cannot show a
+      pattern is not a high-confidence read.
     """
-    return ("none",) if refused else ("high", "medium", "low")
+    if not facts.evidence_sufficient:
+        return ("none",)
+    if refused:
+        return ()
+    if not facts.repeated_transitions():
+        return ("medium", "low")
+    return ("high", "medium", "low")
+
+
+def check_confidence_allowed(response: dict, facts, refused: bool) -> list[str]:
+    """The one check behind every confidence decision, in both directions.
+
+    A refusal used to be checked only for reporting "none", so nothing anywhere
+    could object to a refusal that was not warranted. This checks the pairing:
+    the field has to agree with what the timeline supports.
+    """
+    problems = check_confidence_present(response, facts)
+    value = str(response.get("confidence") or "").strip().lower()
+    if value not in CONFIDENCE_VALUES:
+        return problems  # presence already explained it; do not pile on
+
+    if not facts.evidence_sufficient:
+        # Only complain if it is not already refusing. Below the floor "none" is
+        # the correct answer, and the response that gave it must not be told off
+        # for the value it was required to report.
+        if value != "none":
+            problems.append(
+                f"the FACTS block records this evidence as {facts.sufficiency_note}, "
+                f"so \"confidence\" must be 'none' (a refusal) — a forecast is "
+                f"rejected here"
+            )
+        return problems
+    if refused:
+        problems.append(
+            f"the FACTS block records this evidence as {facts.sufficiency_note}, so a "
+            f"refusal (\"confidence\": \"none\") is rejected: forecast instead"
+        )
+        return problems
+    allowed = allowed_confidence_values(facts, refused=False)
+    if value not in allowed:
+        listed = "', '".join(allowed)
+        reason = ("no transition type repeats in the FACTS block, so confidence may "
+                  "not exceed 'medium'" if len(allowed) < 3 else "")
+        problems.append(
+            f"\"confidence\" must be one of '{listed}'" + (f" — {reason}" if reason else "")
+        )
+    return problems
 
 
 def check_confidence_present(response: dict, facts: TimelineFacts) -> list[str]:
@@ -207,17 +265,101 @@ def check_confidence_present(response: dict, facts: TimelineFacts) -> list[str]:
 def check_refusal_calibrated(
     response: dict, facts: TimelineFacts
 ) -> list[str]:
-    """D: a refusal is held to the calibration rules and nothing else.
+    """A refusal is held to the calibration rules, and only justified if warranted.
 
-    A refusal has no forecast to check against the timeline, so it is exempt
-    from the interval, quote and date rules. It is not exempt from saying how
-    confident it is, which for a refusal is "none" — and that is the whole rule.
+    A refusal has no forecast to check against the timeline, so it is exempt from
+    the interval, quote and date rules. It is not exempt from saying how confident
+    it is, which for a refusal is "none" — and it is not exempt from being
+    warranted: on a timeline with sufficient evidence the refusal is refused.
     """
-    required = allowed_confidence_values(refused=True)
-    problems = check_confidence_present(response, facts)
-    if str(response.get("confidence") or "").strip().lower() not in required:
-        problems.append(f"a refusal must report confidence {required[0]!r}")
-    return problems
+    return check_confidence_allowed(response, facts, refused=True)
+
+
+# Repeat/cycle vocabulary. Matched per clause so that a negated use — "no
+# transition repeats", "without a recurring pattern" — is not mistaken for a
+# claim. That distinction is not pedantic: when nothing repeats, saying so is
+# exactly what the response is required to do.
+_REPEAT_WORD = re.compile(
+    r"\b(repeat|repeats|repeated|repeating|repeats|recurs|recurring|"
+    r"cycle|cycles|cyclical|cycle|loop|loops)\b",
+    re.IGNORECASE,
+)
+_NEGATOR = re.compile(
+    r"\b(no|not|never|without|none|nothing|cannot|can't|isn't|aren't|"
+    r"don't|doesn't|didn't|neither|nor)\b",
+    re.IGNORECASE,
+)
+_NO_REPEAT_DISCLOSURE = re.compile(
+    r"\b(no|not|never|without|none|nothing)\b[^.;]{0,70}?"
+    r"\b(repeat|repeats|repeated|repeating|recurs|recurring|cycle|cycles|"
+    r"cyclical|loop|loops)\b",
+    re.IGNORECASE,
+)
+
+
+def _unnegated_repeat_words(text: str) -> list[str]:
+    """Repeat words that are asserted rather than denied."""
+    hits: list[str] = []
+    for clause in re.split(r"[.;:\n]", text):
+        for match in _REPEAT_WORD.finditer(clause):
+            if _NEGATOR.search(clause[: match.start()]):
+                continue  # "no transition repeats" discloses, it does not claim
+            hits.append(match.group(0).lower())
+    return hits
+
+
+def check_repeat_language(response: dict, facts: TimelineFacts) -> list[str]:
+    """Repeat/cycle language is only allowed where the FACTS block prices it.
+
+    With no repeated pair on record there is nothing to point at, so the words
+    have no referent and a read that uses them is asserting a pattern the
+    application has just computed does not exist. When something does repeat,
+    the read still has to name one of the priced pairs.
+    """
+    text = " ".join(
+        str(response.get(field) or "")
+        for field in ("patterns", "inferred_intent", "predicted_next_move",
+                      "recommendation")
+    )
+    claimed = _unnegated_repeat_words(text)
+    if not claimed:
+        return []
+    priced = facts.repeated_transitions()
+    if not priced:
+        return [
+            f"repeat/cycle/loop language ({', '.join(sorted(set(claimed))[:4])}) is used, "
+            f"but the FACTS block records no transition type repeating — the only "
+            f"transitions on record occur once each. Describe them as 'one observed "
+            f"instance', or state in \"missing_evidence\" that no transition has repeated"
+        ]
+    for earlier, later in priced:
+        if re.search(rf"{re.escape(earlier)}\W+{re.escape(later)}", text, re.IGNORECASE):
+            return []
+    listed = ", ".join(f"{a}->{b}" for a, b in sorted(priced))
+    return [
+        f"repeat/cycle/loop language must name a transition the FACTS block prices as "
+        f"repeating ({listed}); the response names none of them"
+    ]
+
+
+def check_no_repeat_disclosure(response: dict, facts: TimelineFacts) -> list[str]:
+    """With no repeat available, the read has to say that is the situation.
+
+    Otherwise the reader is left to infer it, and the most common way a read
+    fills that gap is by reaching for "a cycle" — the exact claim the FACTS
+    block forbids. Requiring the disclosure makes the absence explicit and gives
+    the confidence cap something to hang on.
+    """
+    if not facts.evidence_sufficient or facts.repeated_transitions():
+        return []
+    missing = str(response.get("missing_evidence") or "")
+    if _NO_REPEAT_DISCLOSURE.search(missing):
+        return []
+    return [
+        "no transition type has repeated in this timeline, so \"missing_evidence\" must "
+        "state that (e.g. \"a second feature->hiring would be the first repeat; nothing "
+        "has repeated yet\")"
+    ]
 
 
 def check_overdue_acknowledged(
@@ -412,13 +554,19 @@ def validate_response(
     patterns = str(response.get("patterns") or "")
     intent = str(response.get("inferred_intent") or "")
 
-    if refused:
+    # Below the evidence floor the only acceptable answer is a refusal, whether
+    # or not the model produced one. Routing an unwarranted forecast through the
+    # refusal branch is deliberate: it gets one targeted message instead of a
+    # pile of interval complaints about a read that should not exist at all.
+    if refused or not facts.evidence_sufficient:
         # A refusal is held to the calibration rules and nothing else: there is
-        # no forecast to check against the timeline.
-        problems.extend(check_refusal_calibrated(response, facts))
-        return problems
+        # no forecast to check against the timeline. And on sufficient evidence
+        # it is not acceptable at all, which `check_confidence_allowed` reports.
+        return check_refusal_calibrated(response, facts)
 
-    problems.extend(check_confidence_present(response, facts))
+    problems.extend(check_confidence_allowed(response, facts, refused=False))
+    problems.extend(check_repeat_language(response, facts))
+    problems.extend(check_no_repeat_disclosure(response, facts))
     problems.extend(check_overdue_acknowledged(response, facts, prediction))
     problems.extend(check_interval_claims(response, facts, patterns, intent,
                                          prediction, evidence=timeline_text))
