@@ -2,21 +2,14 @@
   "version": 2,
   "builds": [
     {
-      "src": "backend/main.py",
+      "src": "frontend/app.py",
       "use": "@vercel/python"
     }
   ],
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "backend/main.py"
+      "dest": "frontend/app.py"
     }
-  ],
-  "env": {
-    "HINDSIGHT_API_KEY": "@hindsight_api_key",
-    "GROQ_API_KEY": "@groq_api_key",
-    "HINDSIGHT_BASE_URL": "https://api.hindsight.vectorize.io",
-    "GROQ_BASE_URL": "https://api.groq.com/openai/v1",
-    "AUTOSEED": "1"
-  }
+  ]
 }
