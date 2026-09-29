@@ -246,6 +246,19 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# Deferred writes to the raw-signal box, applied before the widget exists.
+# A widget's key may only be assigned before that widget is instantiated in the
+# current run, so a clear requested after ingestion -- and a pre-fill requested
+# by the sample button -- are recorded as flags here and consumed on the next
+# run. Writing st.session_state["ss_raw_signal"] anywhere below the text area
+# raises StreamlitAPIException, not just on the click that triggers it but on
+# every rerun that reaches that line.
+_pending_value = st.session_state.pop("ss_pending_value", None)
+if _pending_value is not None:
+    st.session_state["ss_raw_signal"] = _pending_value
+if st.session_state.pop("ss_pending_clear", False):
+    st.session_state.pop("ss_raw_signal", None)
+
 st.markdown(
     """
     <style>
@@ -494,7 +507,12 @@ with st.expander("➕ Log a new signal (live LLM extraction)", expanded=False):
             "signals — the evidence floor — so the read below flips from a "
             "refusal to a forecast."
         )):
-            st.session_state["ss_raw_signal"] = SAMPLE_VERTEX_SIGNAL
+            st.session_state["ss_pending_value"] = SAMPLE_VERTEX_SIGNAL
+            # The flag above is read at the top of the NEXT run, because this
+            # run has already passed that point. Rerunning is what makes the
+            # box fill: without it the pre-fill would sit in the flag until the
+            # user happened to trigger an unrelated rerun.
+            st.rerun()
         st.caption(
             "Vertex Cloud is seeded deliberately thin. Its read refuses today; "
             "the sample signal takes it to the 5-signal floor and it forecasts."
@@ -528,8 +546,11 @@ with st.expander("➕ Log a new signal (live LLM extraction)", expanded=False):
             else:
                 st.session_state["ss_last_signal"] = new_signal
                 # Clearing the box stops the same note being logged twice on a
-                # double click, which would silently add two signals.
-                st.session_state["ss_raw_signal"] = ""
+                # double click, which would silently add two signals. Deferred:
+                # the text area's key was instantiated above, and Streamlit
+                # forbids writing a widget key after its widget exists. The
+                # block at the top of this script pops the key on the next run.
+                st.session_state["ss_pending_clear"] = True
                 fetch_competitors.clear()
                 st.rerun()
 
@@ -615,7 +636,12 @@ if _pending and _pending.get("competitor") == selected:
     if _diff and _diff[0] is not None and _diff[2] == _pending.get(
         "uid", _pending.get("date")
     ):
-        _b, _a = _diff
+        # Three values, not two: the third is the uid of the signal that
+        # produced the after-read, which the guard above already matched on.
+        # Trimming it here to satisfy the unpack would discard that
+        # attribution and let a second log render a diff against a read taken
+        # before the first.
+        _b, _a, _diff_uid = _diff
         st.markdown("#### Side by side")
         _left, _right = st.columns(2)
         with _left:
