@@ -144,13 +144,13 @@ A cap of `0` raises rather than producing an empty prompt: a misconfiguration sh
 
 ### Why we do not use recall, reflect or observations
 
-Hindsight offers `recall`, `reflect` and observation consolidation, and this app uses none of them as its primary path. That is a decision, not an oversight.
+Hindsight offers `recall`, `reflect` and observation consolidation, and **synthesis** uses none of them as its retrieval path. That is a decision, not an oversight. The one exception is scoped: `recall` is reachable from the app's question box, and is described separately below.
 
 - **`recall`** is a relevance-ranked semantic search. It answers "what is similar to this?", which is the wrong question for pattern detection — "what happened, in order, on which date?" Pattern detection needs the _complete ordered timeline_, because the signal that matters is often the one that never repeated, and a relevance-ranked top-k will happily drop it. A prediction grounded in a partial timeline is not a weaker prediction, it is a differently-shaped one, and the difference is invisible to the reader.
 - **`reflect`** is Hindsight's own synthesis pass. Calling it and then also synthesising would mean two models producing two narratives over the same bank, with no rule for which one wins. Keeping synthesis in `backend/synthesis.py` means the grounding rules, the confidence contract and the validators all apply to a single place, and the read is reproducible: same timeline, same prompt, one output.
 - **Observations** are disabled at bank creation (`enable_observations: False`). Hindsight's consolidation would derive its own summaries of each document, which duplicates work this app already does with typed, dated signals — and it would put undated derived prose on the timeline, which is precisely the material that makes a forecast unfalsifiable. The two guards described above keep derived rows off the timeline even so.
 
-The trade is real and worth naming: "what did Nimbus say about audit logs?" is answered by string-matching the timeline rather than by Hindsight's graph search.
+The trade is real and worth naming: inside a strategic read, "what did Nimbus say about audit logs?" is answered by string-matching the timeline rather than by Hindsight's graph search. Asked as a *question* rather than as part of a read, it goes to Hindsight's recall — see the next section.
 
 ### Asking memory a question: the secondary `recall` path
 
