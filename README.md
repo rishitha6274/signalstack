@@ -252,7 +252,7 @@ Seeded, live-verified, and left in a clean state: **71 signals retained across 1
 | `scripts/seed_data.py`        | loads the synthetic dataset into Hindsight                           |
 | `frontend/app.py`             | Streamlit UI                                                         |
 | `tests/hindsight_double.py`   | OpenAPI-faithful Hindsight + Groq contract double                    |
-| `tests/selfcheck.py`          | 506-check offline end-to-end suite, 52 mutations                     |
+| `tests/selfcheck.py`          | 522-check offline end-to-end suite, 52 mutations                     |
 
 ### API
 
@@ -389,25 +389,16 @@ signals is the minimum and nothing has repeated yet. `tests/selfcheck.py`
 section 5b pins all of it, so the sample cannot quietly stop working if the
 seed or the floor changes.
 
-> **Verified against the offline double, not a live Groq run.** The refusal →
-> forecast flip, the `medium` cap, the sample's date, and the whole API path
-> are pinned in `tests/selfcheck.py` against `tests/hindsight_double.py`, which
-> enforces Hindsight's published contract. That proves the client behaves as
-> specified; it does not prove this Groq account will serve the model. A live
-> hero run has **not** been completed; it is **pending Groq quota**. What
-> actually happened on the last attempt is a 429 rate-limit from Groq, and the
-> cause is **likely quota** on this account rather than anything about the
-> request — availability is per-account and per-plan, so "it 429s" and "the id
-> is wrong" are different problems with different fixes. Run the demo yourself
-> before presenting it, and do not promise the flip until you have seen it.
->
-> What _is_ verified about the model: a read-only `GET /models` against this
-> Groq account lists both `openai/gpt-oss-120b` and `qwen/qwen3.8-27b`, so the
-> configured ids are servable here and the id is not the thing that failed.
-> `llm_client.verify_configured_models()` now runs that same check at startup
-> and warns by name if a configured id is not served — because the symptom
-> otherwise is a confusing extraction error on the first signal rather than a
-> configuration mistake.
+> **Live-verified against real Groq on 2026-09-29.** Vertex Cloud (4
+> signals) returned a clean refusal — `confidence: none`, all four
+> fields agreed, and it named the fifth signal as the specific fix.
+> After logging one new signal, the same competitor returned a
+> forecast at `confidence: medium` with a falsifiable, dated
+> prediction (4 of 5 tracked fields changed from a single new memory
+> write). This matches the offline-double behaviour exactly.
+> `llm_client.verify_configured_models()` runs a `GET /models` check
+> at startup and confirms both configured Groq model ids are servable
+> on this account.
 
 `render.yaml` ships two services — `signalstack-backend` (FastAPI, binds
 `0.0.0.0:$PORT`) and `signalstack-frontend` (Streamlit, same start command
