@@ -2,11 +2,17 @@
 
 > **TL;DR**: Signal Stack remembers every competitor signal (typed, dated, ordered) and reasons across them to infer intent and predict the next move. It refuses to fabricate when evidence is insufficient (5-signal floor, longest gap ≤ 3× median), and it is honest when evidence goes stale. Seeded, deterministic, and verifiable offline.
 
+## Live demo
+
+- App: https://signalstack-frontend.onrender.com
+- API: https://signalstack-backend-aca5.onrender.com
+
 **60-second demo**
-1. Select *Nimbus AI* → switch to "Full timeline" (12 signals).  
-2. Click **🧠 Get Strategic Read** → see a dated, falsifiable prediction grounded in the timeline.  
-3. Switch to *Vertex Cloud* (4 signals) → read refuses with `confidence: none` and names the missing evidence.  
-4. Switch to *Brightline Retail* → stale evidence is acknowledged (84d quiet) rather than projected.
+
+1. Select _Nimbus AI_ → switch to "Full timeline" (12 signals).
+2. Click **🧠 Get Strategic Read** → see a dated, falsifiable prediction grounded in the timeline.
+3. Switch to _Vertex Cloud_ (4 signals) → read refuses with `confidence: none` and names the missing evidence.
+4. Switch to _Brightline Retail_ → stale evidence is acknowledged (84d quiet) rather than projected.
 
 **Key sections:** [The problem](#the-problem) · [How Hindsight memory is used](#how-hindsight-memory-is-used) · [Demo script](#demo-script) · [Known limitations](#known-limitations) · [Audit evidence](audit/) · [Verifying without an API key](#verifying-without-an-api-key)
 
@@ -14,11 +20,11 @@
 
 **A competitive intelligence agent that remembers every competitor signal over time, and connects them into a strategic story that gets sharper the longer it watches.**
 
-Most competitor tracking is a list of disconnected facts. Signal Stack remembers *every* signal — pricing changes, feature launches, hiring spikes, messaging shifts, funding rounds — and reasons across signal **types** to infer intent and predict the next move.
+Most competitor tracking is a list of disconnected facts. Signal Stack remembers _every_ signal — pricing changes, feature launches, hiring spikes, messaging shifts, funding rounds — and reasons across signal **types** to infer intent and predict the next move.
 
 A single price cut is just a price cut. Three price cuts in six months, each following a funding round, is a strategy.
 
-*Built with an AI coding agent. The rules, the offline suite and the audits in this README were written and revised in collaboration with one; every number quoted here was produced by running the code, not by asking a model what it thought the answer was.*
+_Built with an AI coding agent. The rules, the offline suite and the audits in this README were written and revised in collaboration with one; every number quoted here was produced by running the code, not by asking a model what it thought the answer was._
 
 ---
 
@@ -28,11 +34,11 @@ Teams track competitors sporadically: a Slack message here, a pricing-page scree
 
 Three things go wrong in the naive version of this product:
 
-| Naive approach | Why it fails |
-|---|---|
-| A scraper + a database, read on demand | Nothing accumulates. Day 1 and day 400 look the same. |
-| Summarize each event and list it back | The user gets a feed, not a conclusion. The cross-type chain is never stated. |
-| RAG with top-k similarity retrieval | **Silently drops the oldest, least-similar memories** — which is exactly where the beginning of a six-month chain lives. The pattern is invisible. |
+| Naive approach                         | Why it fails                                                                                                                                       |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A scraper + a database, read on demand | Nothing accumulates. Day 1 and day 400 look the same.                                                                                              |
+| Summarize each event and list it back  | The user gets a feed, not a conclusion. The cross-type chain is never stated.                                                                      |
+| RAG with top-k similarity retrieval    | **Silently drops the oldest, least-similar memories** — which is exactly where the beginning of a six-month chain lives. The pattern is invisible. |
 
 The third one is the trap, and it is why this project is memory-first rather than scraper-first.
 
@@ -57,7 +63,7 @@ A Hindsight bank is an isolated memory store. Using banks as namespaces means is
 
 Each signal is retained with `POST /v1/default/banks/{bank_id}/memories`:
 
-- `content` — the signal rendered as **one declarative sentence**, because Hindsight extracts *facts* from retained content. One sentence in, one fact out, so the timeline stays one-entry-per-signal instead of fragmenting.
+- `content` — the signal rendered as **one declarative sentence**, because Hindsight extracts _facts_ from retained content. One sentence in, one fact out, so the timeline stays one-entry-per-signal instead of fragmenting.
 - `timestamp` — the signal's own event date, not ingest time. This is what makes Hindsight's temporal recall and ordering correct.
 - `context` — `competitive intelligence signal (pricing)`, which is injected into the extraction prompt and actively shapes what gets extracted.
 - `metadata` — `signal_uid`, `signal_type`, `signal_date`, `signal_summary`, `source`. Metadata propagates down to the extracted memory units, which is how we map a memory unit back to a typed, dated signal.
@@ -74,7 +80,7 @@ This is the decision the whole product rests on, in `get_timeline()`:
 # pages through the complete result set, then sorts by date ascending
 ```
 
-We deliberately do **not** use `/memories/recall`, which is top-k semantic + graph + temporal search. Recall is built to return the *k most relevant* memories, and a February funding round is not semantically similar to a July pricing page. Recall would return the recent enterprise-messaging cluster and quietly omit the raise that caused it — the chain would look unmotivated and the agent would have no strategy to find.
+We deliberately do **not** use `/memories/recall`, which is top-k semantic + graph + temporal search. Recall is built to return the _k most relevant_ memories, and a February funding round is not semantically similar to a July pricing page. Recall would return the recent enterprise-messaging cluster and quietly omit the raise that caused it — the chain would look unmotivated and the agent would have no strategy to find.
 
 We also deliberately do not pass `time_field`: rows with no value on the chosen time column are excluded from both filtering and ordering, which is the opposite of completeness. Sorting happens client-side.
 
@@ -91,7 +97,7 @@ That second rule is what makes the contrast demo work, and it is enforced in cod
 
 **4b. The read knows what day it is, and is honest when the evidence has gone stale.**
 
-The model only ever sees dates that appear in the timeline, so with no reference point it anchors every forecast to the *last logged signal*. That produced a live, fully-grounded prediction with a deadline that had already passed — "will announce RBAC by ~2026-09-20", generated on the 28th. Every signal it cited was real and the cadence was genuinely 2–4 weeks; the forecast was simply about a window that had closed. A reader skims the confident date and stops there.
+The model only ever sees dates that appear in the timeline, so with no reference point it anchors every forecast to the _last logged signal_. That produced a live, fully-grounded prediction with a deadline that had already passed — "will announce RBAC by ~2026-09-20", generated on the 28th. Every signal it cited was real and the cadence was genuinely 2–4 weeks; the forecast was simply about a window that had closed. A reader skims the confident date and stops there.
 
 `backend/synthesis.py` now hands the model an explicit clock and a freshness verdict:
 
@@ -104,7 +110,7 @@ doing, and a forecast drawn from it carries that uncertainty.
 
 "Stale" is judged **against the competitor's own rhythm**, not a fixed day count — the median gap between its own signals, at 1× fresh, 2× aging, beyond that stale. A company that ships weekly and one that ships twice a year are not comparable against a shared threshold. On the seeded data this separates cleanly: Nimbus AI (14-day rhythm, 40 days silent) is stale, while Vertex Cloud (76-day rhythm, 47 days quiet) and Pathfinder Labs (70-day rhythm, 54 days quiet) are both still current — they are simply infrequent, and a fixed threshold would have flagged all three.
 
-The rules that follow from it: forecast from *today*, never present a past date as a future deadline, and when the evidence is stale, disclose that in the prediction and lead the recommendation with the step that **refreshes** the intelligence rather than the step that acts on it. Staleness is never a reason to refuse — the pattern analysis is still the valuable output; it just stops masquerading as current.
+The rules that follow from it: forecast from _today_, never present a past date as a future deadline, and when the evidence is stale, disclose that in the prediction and lead the recommendation with the step that **refreshes** the intelligence rather than the step that acts on it. Staleness is never a reason to refuse — the pattern analysis is still the valuable output; it just stops masquerading as current.
 
 `SynthesisResponse` carries `data_as_of`, `evidence_age_days` and `evidence_staleness` as provenance, and the UI shows a warning banner when the evidence is stale, so the reader sees the caveat before the forecast rather than after it. The no-LLM fallback path reports the same provenance.
 
@@ -122,13 +128,13 @@ Two independent guards keep a derived row off the timeline regardless: the `all_
 
 **6. A prompt is a budget, and going over it is stated rather than hidden.**
 
-Retrieval reads the complete timeline. A single *prompt* cannot, and pretending otherwise is where the two halves of the product would quietly contradict each other: every figure the model is allowed to cite is computed from the signals it can see, so a silently truncated prompt produces a fluent, well-formed analysis of a fragment that reports itself as the whole history.
+Retrieval reads the complete timeline. A single _prompt_ cannot, and pretending otherwise is where the two halves of the product would quietly contradict each other: every figure the model is allowed to cite is computed from the signals it can see, so a silently truncated prompt produces a fluent, well-formed analysis of a fragment that reports itself as the whole history.
 
 `MAX_SIGNALS_IN_PROMPT` (default 40, `.env`-configurable) governs one prompt. Over it, the window keeps three things and nothing else: the **first** signal, where the strategy started; the **most recent** N, where it is now; and **every signal in a repeated transition**, because a `pricing → hiring` move that happened twice is the evidence that licenses the word "repeats" and a window that kept one instance would let the model see a repeat as a one-off. Dropping the oldest, as a naive tail-window does, loses exactly that. The prompt then carries an explicit `EVIDENCE COVERAGE: PARTIAL` line giving both counts, how the window was chosen, the date span the missing signals fall in, and the instruction to say so rather than report the visible run as the lot. Under the cap it says `COMPLETE` with the count, so the model is never guessing which it has.
 
 Two consequences are worth stating plainly, because both are real and neither is a bug to be papered over.
 
-The window is **not contiguous** — the first signal and the recent block are kept, and the gaps between them are gone. So the cadence figures (intervals, median, staleness) are measured on the **full** timeline, not the window: a window is a subset of a history, not a shorter one, and measuring across a gap the selection itself created would invent a silence the company never had. The model is told not to recompute them, so a median derived from a signal it did not see is a fact the prompt disclosed rather than a guess. What it may not do is *quote* the hidden stretch, and the quote check is restricted to the rendered window.
+The window is **not contiguous** — the first signal and the recent block are kept, and the gaps between them are gone. So the cadence figures (intervals, median, staleness) are measured on the **full** timeline, not the window: a window is a subset of a history, not a shorter one, and measuring across a gap the selection itself created would invent a silence the company never had. The model is told not to recompute them, so a median derived from a signal it did not see is a fact the prompt disclosed rather than a guess. What it may not do is _quote_ the hidden stretch, and the quote check is restricted to the rendered window.
 
 `MAX_SIGNALS_IN_PROMPT` is also a **floor for recency, not a hard ceiling**. `signal_type` has five values, so on any timeline of realistic length some consecutive pair repeats by pigeonhole, which makes nearly every signal a participant in a repeated transition and protects it. In practice a 52-signal bank is carried whole and nothing is dropped. That is the correct side of the trade — an over-long prompt beats an understated timeline — but it means the constant does **not** bound prompt size the way its name suggests. Widening `signal_type`, or capping how many repeats may pull extra signals in, is the fix if that ever matters. The suite pins the current behaviour so it changes deliberately.
 
@@ -140,7 +146,7 @@ A cap of `0` raises rather than producing an empty prompt: a misconfiguration sh
 
 Hindsight offers `recall`, `reflect` and observation consolidation, and this app uses none of them as its primary path. That is a decision, not an oversight.
 
-- **`recall`** is a relevance-ranked semantic search. It answers "what is similar to this?", which is the wrong question for pattern detection — "what happened, in order, on which date?" Pattern detection needs the *complete ordered timeline*, because the signal that matters is often the one that never repeated, and a relevance-ranked top-k will happily drop it. A prediction grounded in a partial timeline is not a weaker prediction, it is a differently-shaped one, and the difference is invisible to the reader.
+- **`recall`** is a relevance-ranked semantic search. It answers "what is similar to this?", which is the wrong question for pattern detection — "what happened, in order, on which date?" Pattern detection needs the _complete ordered timeline_, because the signal that matters is often the one that never repeated, and a relevance-ranked top-k will happily drop it. A prediction grounded in a partial timeline is not a weaker prediction, it is a differently-shaped one, and the difference is invisible to the reader.
 - **`reflect`** is Hindsight's own synthesis pass. Calling it and then also synthesising would mean two models producing two narratives over the same bank, with no rule for which one wins. Keeping synthesis in `backend/synthesis.py` means the grounding rules, the confidence contract and the validators all apply to a single place, and the read is reproducible: same timeline, same prompt, one output.
 - **Observations** are disabled at bank creation (`enable_observations: False`). Hindsight's consolidation would derive its own summaries of each document, which duplicates work this app already does with typed, dated signals — and it would put undated derived prose on the timeline, which is precisely the material that makes a forecast unfalsifiable. The two guards described above keep derived rows off the timeline even so.
 
@@ -148,17 +154,17 @@ The trade is real and worth naming: "what did Nimbus say about audit logs?" is a
 
 ### Asking memory a question: the secondary `recall` path
 
-The reasoning above rules recall *out of synthesis*. It does not rule it out of the product, and refusing to use it at all would be its own kind of dogmatism: "what did they do about audit logs?" is a question, and a question is exactly what relevance-ranked search is for. So recall exists, on its own route, for its own purpose.
+The reasoning above rules recall _out of synthesis_. It does not rule it out of the product, and refusing to use it at all would be its own kind of dogmatism: "what did they do about audit logs?" is a question, and a question is exactly what relevance-ranked search is for. So recall exists, on its own route, for its own purpose.
 
-- **`GET /recall/{competitor}?q=…`** calls Hindsight's `POST /v1/default/banks/{bank_id}/memories/recall` with `tags=["signal"]` and `tags_match="all_strict"`. The UI puts it behind an *"Ask this competitor's memory"* box, labelled in the box itself as the k most relevant signals rather than the full timeline.
+- **`GET /recall/{competitor}?q=…`** calls Hindsight's `POST /v1/default/banks/{bank_id}/memories/recall` with `tags=["signal"]` and `tags_match="all_strict"`. The UI puts it behind an _"Ask this competitor's memory"_ box, labelled in the box itself as the k most relevant signals rather than the full timeline.
 - **Synthesis never touches it.** `get_timeline()` remains the only retrieval a strategic read is built from. That separation is asserted two ways: the selfcheck runs `import backend.synthesis` and asserts the module exposes no recall symbol, and a mutation points synthesis at `recall_signals` and requires the check to fail.
-- **The tag scope is necessary and not sufficient.** `all_strict` excludes untagged rows, but Hindsight's derived observations *inherit* their source's tags, so an observation passes the tag filter. The load-bearing guard is the same one the timeline uses: a recall result with no `metadata.signal_uid` is dropped.
-- **`RecallResult` has no `date` field** (checked against the published 0.10.1 OpenAPI, not assumed). The date comes from `metadata.signal_date`, then `occurred_start`, then `mentioned_at`. A client that reached for `result["date"]` would raise `KeyError` on every real recall and work perfectly against a mock that invented the field — which is why the double is built from the spec and the selfcheck asserts the field is *absent*.
+- **The tag scope is necessary and not sufficient.** `all_strict` excludes untagged rows, but Hindsight's derived observations _inherit_ their source's tags, so an observation passes the tag filter. The load-bearing guard is the same one the timeline uses: a recall result with no `metadata.signal_uid` is dropped.
+- **`RecallResult` has no `date` field** (checked against the published 0.10.1 OpenAPI, not assumed). The date comes from `metadata.signal_date`, then `occurred_start`, then `mentioned_at`. A client that reached for `result["date"]` would raise `KeyError` on every real recall and work perfectly against a mock that invented the field — which is why the double is built from the spec and the selfcheck asserts the field is _absent_.
 - **A miss is not a zero.** Zero-overlap rows are not returned, an unknown bank is a 404 rather than an empty list, and a blank or over-200-character query is a 422. A question that matched nothing and a company with no memory are different answers, and a typo should not read as an absence of evidence.
 
 ### Seeing memory change the answer
 
-The point of a persistent-memory agent is that the *answer* moves when the
+The point of a persistent-memory agent is that the _answer_ moves when the
 memory does, so the UI shows that movement rather than asking you to take it
 on faith. Reads are cached per competitor in the session, and logging a signal
 offers a side-by-side diff of the read you already generated against a fresh
@@ -172,7 +178,7 @@ the count as growth ("4 → 5 this session") rather than a bare number, because
 a static count hides the event that is the whole product.
 
 A rate-limited read is answered `200` with the deterministic read, so the UI
-distinguishes it from a broken key and says *wait*, with the provider's own
+distinguishes it from a broken key and says _wait_, with the provider's own
 retry hint. Telling someone to check their API key when their key is fine is
 the worse of the two failures.
 
@@ -197,7 +203,7 @@ It then exercises the seeded dataset, idempotent re-seeding, timeline ordering, 
 
 The last two sections are the ones worth trusting. Section 9 replays five specific defects found by auditing the real 10-competitor run — an unsupported "repeats three times", a silent 26-day gap, a skipped cycle stage, a confident read with no confidence field, a fabricated 30-day cadence — and pins the current behaviour against each. Section 10 then deletes each new rule from the source, in a mutated copy of the module, and asserts the corresponding test **stops firing**: 52 mutations, each of which must break something, so none of those tests can pass for the wrong reason. A check that fails on the real code is a bug; a check that still passes with its own rule deleted is a test that proves nothing.
 
-Seven of those mutations re-introduce defects found by the *second* audit, verbatim: a refusal allowed to report `high`/`medium`/`low`, the retry notice asking the wrong end of the confidence contract, the permitted-number list dropped from the notice, a withheld narrative not flagged as withheld, the digits-only interval pattern, the indefinite article read as the quantity, and the cadence cue that keeps "within a month" from being read as a measured cadence. Each is pinned to the test that caught it, so the fix cannot be reverted silently.
+Seven of those mutations re-introduce defects found by the _second_ audit, verbatim: a refusal allowed to report `high`/`medium`/`low`, the retry notice asking the wrong end of the confidence contract, the permitted-number list dropped from the notice, a withheld narrative not flagged as withheld, the digits-only interval pattern, the indefinite article read as the quantity, and the cadence cue that keeps "within a month" from being read as a measured cadence. Each is pinned to the test that caught it, so the fix cannot be reverted silently.
 
 It is not a substitute for a live run — it proves the client matches the documented contract, not that your account is provisioned. Run it first, then point at real Hindsight.
 
@@ -205,9 +211,9 @@ It is not a substitute for a live run — it proves the client matches the docum
 
 Both bugs above were found by running the code against the real API rather than by reading the spec, and the two interesting results are worth stating plainly.
 
-**On the rich competitor, the real model found the planted pattern and ignored the decoy.** Nimbus AI's 12 signals contain an ~8-week chain — funding → GTM hires → price cut → volume discount → enterprise messaging → SSO/SCIM → enterprise hiring → campaign → enterprise tier — plus one *unrelated* funding round placed on 2026-02-27 that belongs to no chain. The model dated the sequence, estimated the 2–4 week gaps, and did not fold the stray round into the narrative. Its prediction was falsifiable and self-dated: a formal Enterprise onboarding/partner program by early October 2026, to be refuted by its absence after 2026-10-10.
+**On the rich competitor, the real model found the planted pattern and ignored the decoy.** Nimbus AI's 12 signals contain an ~8-week chain — funding → GTM hires → price cut → volume discount → enterprise messaging → SSO/SCIM → enterprise hiring → campaign → enterprise tier — plus one _unrelated_ funding round placed on 2026-02-27 that belongs to no chain. The model dated the sequence, estimated the 2–4 week gaps, and did not fold the stray round into the narrative. Its prediction was falsifiable and self-dated: a formal Enterprise onboarding/partner program by early October 2026, to be refuted by its absence after 2026-10-10.
 
-**On thin competitors it refused, and that took a prompt fix.** Vertex Cloud (4 signals) and Pathfinder Labs (3) originally produced a *contradiction*: `patterns` correctly said "insufficient evidence of a recurring pattern", and then `predicted_next_move` went ahead and speculated anyway ("if they follow a typical quarterly cadence, they might…"). A hedged forecast of a strategy the model had just admitted it could not identify is a fabrication wearing a disclaimer. The grounding rules now require all four fields to agree — when `patterns` reports insufficient evidence, the prediction must decline and name the evidence that would settle it, and the recommendation must be to keep collecting. Both thin competitors now return a coherent, consistent refusal that names the specific missing signal types.
+**On thin competitors it refused, and that took a prompt fix.** Vertex Cloud (4 signals) and Pathfinder Labs (3) originally produced a _contradiction_: `patterns` correctly said "insufficient evidence of a recurring pattern", and then `predicted_next_move` went ahead and speculated anyway ("if they follow a typical quarterly cadence, they might…"). A hedged forecast of a strategy the model had just admitted it could not identify is a fabrication wearing a disclaimer. The grounding rules now require all four fields to agree — when `patterns` reports insufficient evidence, the prediction must decline and name the evidence that would settle it, and the recommendation must be to keep collecting. Both thin competitors now return a coherent, consistent refusal that names the specific missing signal types.
 
 Seeded, live-verified, and left in a clean state: **71 signals retained across 10 competitors, 71 memory facts, `fact_count == signal_count` on all ten banks.**
 
@@ -233,31 +239,31 @@ Seeded, live-verified, and left in a clean state: **71 signals retained across 1
                     └──────────────────────────────────────────┘
 ```
 
-| File | Role |
-|---|---|
-| `backend/config.py` | env loading, Hindsight base-URL normalisation, model/timeout knobs |
-| `backend/models.py` | Pydantic schemas, date coercion, signal uids |
+| File                          | Role                                                                 |
+| ----------------------------- | -------------------------------------------------------------------- |
+| `backend/config.py`           | env loading, Hindsight base-URL normalisation, model/timeout knobs   |
+| `backend/models.py`           | Pydantic schemas, date coercion, signal uids                         |
 | `backend/hindsight_client.py` | **bank-per-competitor read/write, chronological-complete retrieval** |
-| `backend/llm_client.py` | Groq wrapper: retries, model fallback, JSON salvage |
-| `backend/ingestion.py` | raw text → structured Signal (+ heuristic fallback) |
-| `backend/synthesis.py` | timeline → strategic narrative (the differentiator) |
-| `backend/routes.py` | HTTP endpoints |
-| `backend/main.py` | FastAPI app, CORS for Streamlit |
-| `scripts/seed_data.py` | loads the synthetic dataset into Hindsight |
-| `frontend/app.py` | Streamlit UI |
-| `tests/hindsight_double.py` | OpenAPI-faithful Hindsight + Groq contract double |
-| `tests/selfcheck.py` | 506-check offline end-to-end suite, 52 mutations |
+| `backend/llm_client.py`       | Groq wrapper: retries, model fallback, JSON salvage                  |
+| `backend/ingestion.py`        | raw text → structured Signal (+ heuristic fallback)                  |
+| `backend/synthesis.py`        | timeline → strategic narrative (the differentiator)                  |
+| `backend/routes.py`           | HTTP endpoints                                                       |
+| `backend/main.py`             | FastAPI app, CORS for Streamlit                                      |
+| `scripts/seed_data.py`        | loads the synthetic dataset into Hindsight                           |
+| `frontend/app.py`             | Streamlit UI                                                         |
+| `tests/hindsight_double.py`   | OpenAPI-faithful Hindsight + Groq contract double                    |
+| `tests/selfcheck.py`          | 506-check offline end-to-end suite, 52 mutations                     |
 
 ### API
 
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/health` | config status |
-| `GET` | `/competitors` | every competitor + size/freshness of its memory |
-| `POST` | `/competitors` | register a competitor, create its bank |
-| `POST` | `/signals` | raw text → LLM-extracted Signal → Hindsight |
-| `GET` | `/timeline/{competitor}` | complete chronological timeline |
-| `POST` | `/synthesize` | strategic read |
+| Method | Path                     | Purpose                                         |
+| ------ | ------------------------ | ----------------------------------------------- |
+| `GET`  | `/health`                | config status                                   |
+| `GET`  | `/competitors`           | every competitor + size/freshness of its memory |
+| `POST` | `/competitors`           | register a competitor, create its bank          |
+| `POST` | `/signals`               | raw text → LLM-extracted Signal → Hindsight     |
+| `GET`  | `/timeline/{competitor}` | complete chronological timeline                 |
+| `POST` | `/synthesize`            | strategic read                                  |
 
 ---
 
@@ -282,11 +288,11 @@ cp .env.example .env
 python scripts/seed_data.py --reset --verify
 ```
 
-This writes 71 signals across 10 competitors into Hindsight and reads them back. Re-running without `--reset` is safe *for identical data* — signals are keyed by `document_id`, so unchanged rows are replaced rather than duplicated.
+This writes 71 signals across 10 competitors into Hindsight and reads them back. Re-running without `--reset` is safe _for identical data_ — signals are keyed by `document_id`, so unchanged rows are replaced rather than duplicated.
 
-**`--reset` deletes every Signal Stack bank, not only the seeded ones.** It used to iterate the seed file, which meant a bank created by anything else survived a command that printed "reset" and exited 0. That is the worst available combination: memory that looks clean, a clean-looking command, and a synthesis read quietly reasoning over whatever actually survived — a stray probe bank is exactly how it happened here. Banks outside the seed file are now listed by name *before* they are removed, so the operator sees what is being destroyed. If you have real data in a Signal Stack bank, this command will delete it; use `scripts/seed_data.py` without `--reset` to add to it.
+**`--reset` deletes every Signal Stack bank, not only the seeded ones.** It used to iterate the seed file, which meant a bank created by anything else survived a command that printed "reset" and exited 0. That is the worst available combination: memory that looks clean, a clean-looking command, and a synthesis read quietly reasoning over whatever actually survived — a stray probe bank is exactly how it happened here. Banks outside the seed file are now listed by name _before_ they are removed, so the operator sees what is being destroyed. If you have real data in a Signal Stack bank, this command will delete it; use `scripts/seed_data.py` without `--reset` to add to it.
 
-**Editing a seeded signal's date orphans the original.** The uid is `slug | date | type | digest`, and that uid *is* the Hindsight `document_id`, so changing a date produces a new document and the old one stays behind. Brightline's bank silently held 13 signals where the file had 7 — and because the orphans were the same announcements a fortnight earlier, the synthesis read them as a genuine "announce, then reinforce a week later" cadence and reported it as a finding. `--verify` now fails the command on any read-back mismatch and names the orphaned rows; `--reset` rebuilds the bank.
+**Editing a seeded signal's date orphans the original.** The uid is `slug | date | type | digest`, and that uid _is_ the Hindsight `document_id`, so changing a date produces a new document and the old one stays behind. Brightline's bank silently held 13 signals where the file had 7 — and because the orphans were the same announcements a fortnight earlier, the synthesis read them as a genuine "announce, then reinforce a week later" cadence and reported it as a finding. `--verify` now fails the command on any read-back mismatch and names the orphaned rows; `--reset` rebuilds the bank.
 
 ### Run
 
@@ -358,10 +364,10 @@ python scripts/seed_data.py --reset --verify   # wipe and re-seed the banks
 The UI warns that logging writes to the seeded bank. The reset lives behind
 **two independent gates**, because it is the most destructive thing in the app:
 
-| Gate | Default | Effect |
-| --- | --- | --- |
+| Gate                  | Default | Effect                                                                                                                                      |
+| --------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ENABLE_DEMO_RESET=1` | **off** | If unset or `0`, `POST /demo/reset` is not registered and answers **404**. The UI hides its reset button and instead shows the CLI command. |
-| `API_KEY` (when set) | unset | With a key configured, the call must present a matching `X-API-Key` or it is **401**. |
+| `API_KEY` (when set)  | unset   | With a key configured, the call must present a matching `X-API-Key` or it is **401**.                                                       |
 
 The flag is the primary gate rather than the key because with `API_KEY` unset —
 the local default — the key check is a no-op, so a route guarded only by it is
@@ -395,7 +401,7 @@ seed or the floor changes.
 > is wrong" are different problems with different fixes. Run the demo yourself
 > before presenting it, and do not promise the flip until you have seen it.
 >
-> What *is* verified about the model: a read-only `GET /models` against this
+> What _is_ verified about the model: a read-only `GET /models` against this
 > Groq account lists both `openai/gpt-oss-120b` and `qwen/qwen3.8-27b`, so the
 > configured ids are servable here and the id is not the thing that failed.
 > `llm_client.verify_configured_models()` now runs that same check at startup
@@ -438,22 +444,22 @@ The `2026-03-11` feature release is planted on purpose: it is unrelated to the s
 
 Ten competitors, 71 signals, chosen so the retrieval and grounding paths get exercised rather than just the demo case. Each has a genuinely different arc, and the end dates are deliberately uneven so evidence staleness is visible in the product:
 
-| Competitor | n | Arc | Evidence |
-|---|---|---|---|
-| Nimbus AI | 12 | Series C → enterprise land-grab | **stale** (14-day rhythm, 40d quiet) |
-| Palisade Security | 11 | Incident → compliance rebuild → federal | fresh (3d) |
-| Lumen Health | 9 | Regulated-market compliance chain | **aging** (48d) |
-| Corvus Data | 8 | Open-core → commercial cloud | fresh (4d) |
-| Halcyon Mobility | 8 | Utility pricing → fleet platform | fresh (6d) |
-| Brightline Retail | 7 | Metronomic 28-day cadence, then silence | **stale** (28-day rhythm, 84d quiet) |
-| Ferrous Systems | 6 | Hardware → software and services | fresh (12d) |
-| Vertex Cloud | 4 | Uncorrelated incumbent | fresh (47d, but 76-day rhythm) |
-| Pathfinder Labs | 3 | Sparse devtools | fresh (54d) |
-| Tidewater Analytics | 3 | Sparse BI vendor | fresh (53d) |
+| Competitor          | n   | Arc                                     | Evidence                             |
+| ------------------- | --- | --------------------------------------- | ------------------------------------ |
+| Nimbus AI           | 12  | Series C → enterprise land-grab         | **stale** (14-day rhythm, 40d quiet) |
+| Palisade Security   | 11  | Incident → compliance rebuild → federal | fresh (3d)                           |
+| Lumen Health        | 9   | Regulated-market compliance chain       | **aging** (48d)                      |
+| Corvus Data         | 8   | Open-core → commercial cloud            | fresh (4d)                           |
+| Halcyon Mobility    | 8   | Utility pricing → fleet platform        | fresh (6d)                           |
+| Brightline Retail   | 7   | Metronomic 28-day cadence, then silence | **stale** (28-day rhythm, 84d quiet) |
+| Ferrous Systems     | 6   | Hardware → software and services        | fresh (12d)                          |
+| Vertex Cloud        | 4   | Uncorrelated incumbent                  | fresh (47d, but 76-day rhythm)       |
+| Pathfinder Labs     | 3   | Sparse devtools                         | fresh (54d)                          |
+| Tidewater Analytics | 3   | Sparse BI vendor                        | fresh (53d)                          |
 
 Three things are worth pulling out:
 
-- **Brightline Retail is the stale-evidence case that matters.** Its cadence is exactly 28 days for six consecutive intervals, then stops. The gap cannot distinguish *the cadence broke* from *the cadence continued and someone stopped watching*, and the read says so rather than projecting the old rhythm as if it were live. Live, it reports the cadence, forecasts to 2026-10-15, and adds *"this forecast rests on a signal stream that has been quiet for 84 days, so confidence is limited."*
+- **Brightline Retail is the stale-evidence case that matters.** Its cadence is exactly 28 days for six consecutive intervals, then stops. The gap cannot distinguish _the cadence broke_ from _the cadence continued and someone stopped watching_, and the read says so rather than projecting the old rhythm as if it were live. Live, it reports the cadence, forecasts to 2026-10-15, and adds _"this forecast rests on a signal stream that has been quiet for 84 days, so confidence is limited."_
 - **Vertex Cloud refuses because it is below the evidence floor.** It has 4 signals, one short of the 5-signal floor, so `confidence: none` is the only answer the validators accept. Its intervals (76d, 83d, 43d) are regular enough to have a median of 76d, which is exactly why it is the useful contrast: the read is not refusing because the timeline looks erratic, it is refusing because there is too little of it. The refusal names the specific signal that would settle it.
 - **The infrequent competitors are not stale.** Vertex Cloud (76-day rhythm), Pathfinder Labs (70-day) and Tidewater Analytics (91-day) are all quiet for 47–54 days and all read as current. A fixed 30-day threshold would have flagged all three, and warned you about companies that simply do not announce often.
 
@@ -461,11 +467,11 @@ Three things are worth pulling out:
 
 ## Demo script
 
-1. **One signal means nothing.** Select *Nimbus AI*, set memory depth to **"1 signal (no pattern possible)"**. "That's the entire story: they raised money. Congratulations."
+1. **One signal means nothing.** Select _Nimbus AI_, set memory depth to **"1 signal (no pattern possible)"**. "That's the entire story: they raised money. Congratulations."
 2. **Reveal the accumulation.** Switch to **"Full timeline"** — 12 signals over six months, colour-coded by type. "This wasn't scraped. Every one of these is a separate memory write, and they're all still there."
-3. **Get the strategic read.** Click **🧠 Get Strategic Read**. The output connects funding → hiring → pricing → messaging, and ends in a falsifiable prediction. Note the caption: *built from 12 signals (2026-02-18 to 2026-08-19)*, and the warning that the evidence is 40 days old.
-4. **Contrast.** Switch to *Vertex Cloud* and read it again. It has 4 signals — one short of the 5-signal evidence floor — so the read is a refusal by rule, and it names the specific missing signal that would settle the question. "The evidence is below the floor for a confident read; one more signal would change that." The agent declines to fabricate, which is the harder and more valuable behaviour to demonstrate.
-5. **Stale evidence.** Switch to *Brightline Retail*. The pattern section finds a precise 28-day cadence, the prediction is dated forward, and both carry the caveat that the timeline stopped 84 days ago. This is what a correct answer looks like when the data has gone cold.
+3. **Get the strategic read.** Click **🧠 Get Strategic Read**. The output connects funding → hiring → pricing → messaging, and ends in a falsifiable prediction. Note the caption: _built from 12 signals (2026-02-18 to 2026-08-19)_, and the warning that the evidence is 40 days old.
+4. **Contrast.** Switch to _Vertex Cloud_ and read it again. It has 4 signals — one short of the 5-signal evidence floor — so the read is a refusal by rule, and it names the specific missing signal that would settle the question. "The evidence is below the floor for a confident read; one more signal would change that." The agent declines to fabricate, which is the harder and more valuable behaviour to demonstrate.
+5. **Stale evidence.** Switch to _Brightline Retail_. The pattern section finds a precise 28-day cadence, the prediction is dated forward, and both carry the caveat that the timeline stopped 84 days ago. This is what a correct answer looks like when the data has gone cold.
 
 Optional: the **Log a new signal** expander shows live ingestion — paste a raw note, the LLM extracts `{signal_type, date, summary, source}`, and it is written to that competitor's Hindsight bank and appears on the timeline.
 
@@ -511,11 +517,11 @@ Note what the second line of that block says: the one transition the model may d
 
 Five things follow from that block being authoritative:
 
-- **A cadence claim is checked against the measured intervals.** `check_interval_claims` accepts a number if it is one of the intervals, one of the stream's other derived figures (age, overdue, median, extremes), within ±2 days of one, or stated as a *duration* in the evidence. Units are handled separately, and so are the two directions: "about a month" is converted to 30–31 days against Brightline's 28-day median and accepted, and a bare "30 days" is accepted for the same reason — but "10 day cadence" is not, because day claims are matched only against day figures, and the tolerance window would otherwise bridge units and let Brightline's 84-day age satisfy a 10-day claim as 12 weeks.
+- **A cadence claim is checked against the measured intervals.** `check_interval_claims` accepts a number if it is one of the intervals, one of the stream's other derived figures (age, overdue, median, extremes), within ±2 days of one, or stated as a _duration_ in the evidence. Units are handled separately, and so are the two directions: "about a month" is converted to 30–31 days against Brightline's 28-day median and accepted, and a bare "30 days" is accepted for the same reason — but "10 day cadence" is not, because day claims are matched only against day figures, and the tolerance window would otherwise bridge units and let Brightline's 84-day age satisfy a 10-day claim as 12 weeks.
 - **The spelling of a number does not decide whether it is checked.** "2 weeks" was checked while "two weeks" was not, so the same claim got a different verdict by spelling — the rule depended on the number format, not on the fact. Amounts are now read in digits and in words, so "two weeks", "a fortnight" and "a month" are measured exactly as "14 days" and "1 month" are. The indefinite article is the one exception, and it is an exception for a reason: a bare "a month" is ambiguous between a cadence and a forecast horizon, so it counts as a measured claim only when a cadence cue is near it ("every month", "a month between signals"), while "expect a launch within a month" is left alone. A specific figure is a measurement whichever way it is spelled. The article is also not read as a quantity — "a 28 day cadence" is 28 days, not 1 and 28.
 - **A date in the prediction is checked against the real signal dates.** A past ISO date is allowed only when it is an actual signal date, or when the sentence around it is narrative ("the 2026-04-02 launch was never announced") rather than a deadline. "They will ship by 2026-08-03", said on 2026-09-28, is rejected however confident it sounds.
-- **Repetition is priced.** Only transitions occurring at least twice appear in the block, so "repeats three times" has nothing to be true of. A read may use the words repeat, cycle, loop or recurring only for a transition the block prices as repeating, and naming no priced transition is rejected — saying *no* transition repeats is a disclosure, not a claim, and is never flagged.
-- **Sufficiency decides whether a refusal is available at all.** A timeline is sufficient when it has at least 5 signals *and* its longest gap is within 3x its median interval. Below that floor the only accepted answer is a refusal (`confidence: none`); at or above it a refusal is **rejected**, because a timeline that supports a read does not get to decline one. Above the floor with nothing repeating, confidence is capped at `medium` and `missing_evidence` must disclose that no transition has repeated — either as a denial ("nothing has repeated yet") or by naming the occurrence that is missing ("a second feature->hiring would be the first repeat"). Both wordings are accepted, because a check that turns on phrasing is the same defect as an interval rule that passes "14 days" and fails "two weeks". This replaced the earlier rule — refuse when no transition type repeats — which was measuring vocabulary rather than evidence: it rejected Palisade (11 signals) and Ferrous (6) in a live sweep for having no repeated pair, while waving through forecasts built on long, erratic timelines that repeated nothing simply because they were irregular. Note that the 5-signal floor is **tuned to this corpus** (it separates the three designed refusals at 3–4 signals from the seven designed forecasts at 6+), not derived from a measured threshold; the dispersion guard is not exercised by any competitor here either.
+- **Repetition is priced.** Only transitions occurring at least twice appear in the block, so "repeats three times" has nothing to be true of. A read may use the words repeat, cycle, loop or recurring only for a transition the block prices as repeating, and naming no priced transition is rejected — saying _no_ transition repeats is a disclosure, not a claim, and is never flagged.
+- **Sufficiency decides whether a refusal is available at all.** A timeline is sufficient when it has at least 5 signals _and_ its longest gap is within 3x its median interval. Below that floor the only accepted answer is a refusal (`confidence: none`); at or above it a refusal is **rejected**, because a timeline that supports a read does not get to decline one. Above the floor with nothing repeating, confidence is capped at `medium` and `missing_evidence` must disclose that no transition has repeated — either as a denial ("nothing has repeated yet") or by naming the occurrence that is missing ("a second feature->hiring would be the first repeat"). Both wordings are accepted, because a check that turns on phrasing is the same defect as an interval rule that passes "14 days" and fails "two weeks". This replaced the earlier rule — refuse when no transition type repeats — which was measuring vocabulary rather than evidence: it rejected Palisade (11 signals) and Ferrous (6) in a live sweep for having no repeated pair, while waving through forecasts built on long, erratic timelines that repeated nothing simply because they were irregular. Note that the 5-signal floor is **tuned to this corpus** (it separates the three designed refusals at 3–4 signals from the seven designed forecasts at 6+), not derived from a measured threshold; the dispersion guard is not exercised by any competitor here either.
 - **Staleness caps confidence.** An overdue stream may not be reported as `high`.
 - **Every read carries `confidence` and `missing_evidence`.** A refusal that is not explicit about what it does not know is a refusal the reader cannot act on.
 
@@ -550,7 +556,7 @@ Two of the rules cannot be expressed as a post-hoc check and stay in the prompt,
 
 The brief warns that Groq's `gpt-oss` models intermittently produce malformed or tool-call-shaped responses. `backend/llm_client.py` handles it, and the paths below are all exercised:
 
-- **`response_format` rejected (HTTP 400)** → the retry drops JSON mode and asks again, rather than repeating a request that already failed. Worst case 2 models × 3 attempts, and `call_llm_json` does not re-loop, so a bad provider cannot multiply requests. The 400 is not hypothetical: `gpt-oss` accepts `response_format` only when the prompt contains the literal word *json* (it routes through a structured-output path), and it additionally returns a `reasoning` field that has to be stripped before parsing. Both prompts contain the word.
+- **`response_format` rejected (HTTP 400)** → the retry drops JSON mode and asks again, rather than repeating a request that already failed. Worst case 2 models × 3 attempts, and `call_llm_json` does not re-loop, so a bad provider cannot multiply requests. The 400 is not hypothetical: `gpt-oss` accepts `response_format` only when the prompt contains the literal word _json_ (it routes through a structured-output path), and it additionally returns a `reasoning` field that has to be stripped before parsing. Both prompts contain the word.
 - **Model unavailable** → falls back from `openai/gpt-oss-120b` to `qwen/qwen3.8-27b`, skipping any candidate this account is not actually served. This is not theoretical either: the original fallback `qwen/qwen3-32b` returned no match on `GET /models` for the account this was tested against, which is why the list is now probed and filtered at call time instead of assumed.
 - **Markdown fences / preamble / `<think>` block / unclosed `<tool_call>`** → stripped, then the first balanced `{...}` is extracted.
 - **Truncated completion** (stop token mid-JSON, including nested) → salvaged: close the open string, drop the dangling incomplete pair, append exactly the missing closers. Verified against `{"a":1,"b":{"c":"cut` and similar.
@@ -565,7 +571,7 @@ The brief warns that Groq's `gpt-oss` models intermittently produce malformed or
 ## Notes and limitations
 
 - **Synthetic data, on purpose.** Real competitor tracking needs scraping and will fail live. The seeded dataset makes the demo reproducible.
-- **`GET /competitors` returns objects, not bare strings.** It adds `signal_count`, `fact_count` and `last_write_at` so the sidebar can show memory accumulating — the growth *is* the pitch.
+- **`GET /competitors` returns objects, not bare strings.** It adds `signal_count`, `fact_count` and `last_write_at` so the sidebar can show memory accumulating — the growth _is_ the pitch.
 - **Extraction quality is only as good as the note.** The heuristic fallback is deliberately dumb; it exists so a demo button never dead-ends, not as a production path.
 - **`synthesis.py` spends a whole timeline into one prompt.** Past a few hundred signals per competitor this needs chunking or Hindsight's own `reflect` operation to stay inside the context window.
 
@@ -575,7 +581,7 @@ The brief warns that Groq's `gpt-oss` models intermittently produce malformed or
 
 The honest edges of the system, kept apart from the feature documentation above.
 
-- **Staleness figures are relative to the date you read this.** Every "40 days overdue", "84 days", "47 days" and "2026-09-25" in this README was computed against **2026-09-28**, the audit date, and the seeded dataset is frozen as of then. Re-run tomorrow and the overdue counts grow, the staleness bands move, and a forecast the model dates forward may be generated about a window that has already closed. The seeded dates themselves do not move, so the *cadence* claims stay true and only the staleness claims decay.
+- **Staleness figures are relative to the date you read this.** Every "40 days overdue", "84 days", "47 days" and "2026-09-25" in this README was computed against **2026-09-28**, the audit date, and the seeded dataset is frozen as of then. Re-run tomorrow and the overdue counts grow, the staleness bands move, and a forecast the model dates forward may be generated about a window that has already closed. The seeded dates themselves do not move, so the _cadence_ claims stay true and only the staleness claims decay.
 
 - **The fallback model id was verified against a live account, and availability is per-account anyway.** `GET /models` on the account this was tested against serves 11 ids, including both `openai/gpt-oss-120b` and the configured `qwen/qwen3.8-27b`, and does **not** include the old `qwen/qwen3-32b` that the code once fell back to. So the default is correct for this account — but that is the point rather than a reassurance: model availability is per-account and per-plan, and an id served on one plan 400s on another. `available_models()` probes `/models` once and `_model_candidates()` drops anything this account is not served, falling back to a known-present `gpt-oss` id if neither configured model qualifies, so a stale id in `.env` degrades to a working model rather than an error. If you point this at a different account, re-run the probe; do not trust the default.
 
@@ -585,7 +591,7 @@ The honest edges of the system, kept apart from the feature documentation above.
 
 - **`check_no_partial_claims` is phrase-based, and phrasing is exactly what it cannot police.** The validator blocks a truncated read that describes its window as a whole history by matching a fixed set of phrases — "across their entire history", "all 12 signals", "since the beginning" — and it is deliberately blind to everything those phrases do not cover. A model that writes "every one of these signals shows a pricing-led squeeze" passes, and so does "the timeline is unambiguous", even though both assert completeness over a fragment. The check is a floor against the specific failure mode observed in the audit, not a proof of calibration: it cannot tell a confident claim from a hedged one, and tightening it into a semantic judgement would put a language model's guess inside the validator that exists precisely because language models are not reliable judges. The coverage line in the prompt is the load-bearing disclosure; this check only catches the phrases the audit actually saw.
 
-- **Trend consistency (failure mode C) is prompt-enforced, not programmatically verified.** No validator checks a prediction against the types of the most recent signals. The prompt asks for a trend-consistent read and the audit's mode-C heuristic is only a keyword guess, but nothing in `validators.py` enforces it — a prediction contradicting the latest signal types would pass. Staleness/overdue (mode B) *is* enforced programmatically, by `check_overdue_acknowledged`.
+- **Trend consistency (failure mode C) is prompt-enforced, not programmatically verified.** No validator checks a prediction against the types of the most recent signals. The prompt asks for a trend-consistent read and the audit's mode-C heuristic is only a keyword guess, but nothing in `validators.py` enforces it — a prediction contradicting the latest signal types would pass. Staleness/overdue (mode B) _is_ enforced programmatically, by `check_overdue_acknowledged`.
 
 - **Only manual/seeded input is supported; live scraping was scoped out deliberately.** Competitor text is a prompt-injection surface: a scraped page can carry instructions the model reads as part of the read. Until there is an isolation and sanitisation layer, ingestion is paste-a-signal plus the seeded dataset, and nothing is fetched from the web.
 
@@ -593,15 +599,15 @@ The honest edges of the system, kept apart from the feature documentation above.
 
 Five failure modes were checked programmatically across all 10 competitors' live reads — A: overclaimed repetition · B: ignored staleness · C: prediction contradicts the latest trend · D: missing calibration or verbatim grounding · E: arithmetic or date error.
 
-| Failure mode | Original baseline (prose refusal rule) | Final sweep (field refusal rule) |
-| --- | --- | --- |
-| A — overclaimed repetition | 3 | 0 |
-| B — ignored staleness | 2 | 0 |
-| C — contradicts latest trend | 1 | 0 |
-| D — missing calibration / grounding | 7 | 0 |
-| E — arithmetic or date error | 6 | 0 |
-| **Total failures** | **19** | **0** |
+| Failure mode                        | Original baseline (prose refusal rule) | Final sweep (field refusal rule) |
+| ----------------------------------- | -------------------------------------- | -------------------------------- |
+| A — overclaimed repetition          | 3                                      | 0                                |
+| B — ignored staleness               | 2                                      | 0                                |
+| C — contradicts latest trend        | 1                                      | 0                                |
+| D — missing calibration / grounding | 7                                      | 0                                |
+| E — arithmetic or date error        | 6                                      | 0                                |
+| **Total failures**                  | **19**                                 | **0**                            |
 
-*Footnote — this is not a controlled A/B.* The refusal classifier changed mid-project from prose-based (grepping the narrative for "insufficient evidence") to field-based (`confidence == "none"`). The original baseline above was measured under the prose rule; only the final sweep was measured under the current field rule. The improvement is indicative, not a like-for-like experiment.
+_Footnote — this is not a controlled A/B._ The refusal classifier changed mid-project from prose-based (grepping the narrative for "insufficient evidence") to field-based (`confidence == "none"`). The original baseline above was measured under the prose rule; only the final sweep was measured under the current field rule. The improvement is indicative, not a like-for-like experiment.
 
-*Where the baseline came from, and why you cannot reproduce it.* The `3 / 2 / 1 / 7 / 6` figures come from the **original audit harness**, whose results are recorded in [`audit/FINDINGS.md`](audit/FINDINGS.md). That harness was **revised during the project and no surviving copy of the original remains**, so the baseline cannot be re-derived from anything checked in. Running the current scripts over the same preserved reads in [`audit/before/`](audit/before/) gives **`0 / 0 / 0 / 10 / 0`** — 10 failures, not 19 — and most of the difference is mode `D`: the `before/` reads predate the `confidence` field entirely, so all ten now fail the calibration check where the original scored seven. The current scripts, their inputs and their scored output are all in [`audit/`](audit/), including [`audit/scripts/check.py`](audit/scripts/check.py), which is the one that produces `0 / 0 / 0 / 10 / 0` from `before/`, and [`audit/report_final.json`](audit/report_final.json), the `0 / 0 / 0 / 0 / 0` result. Treat this table as a record of what was observed at the time, not as a reproducible measurement.
+_Where the baseline came from, and why you cannot reproduce it._ The `3 / 2 / 1 / 7 / 6` figures come from the **original audit harness**, whose results are recorded in [`audit/FINDINGS.md`](audit/FINDINGS.md). That harness was **revised during the project and no surviving copy of the original remains**, so the baseline cannot be re-derived from anything checked in. Running the current scripts over the same preserved reads in [`audit/before/`](audit/before/) gives **`0 / 0 / 0 / 10 / 0`** — 10 failures, not 19 — and most of the difference is mode `D`: the `before/` reads predate the `confidence` field entirely, so all ten now fail the calibration check where the original scored seven. The current scripts, their inputs and their scored output are all in [`audit/`](audit/), including [`audit/scripts/check.py`](audit/scripts/check.py), which is the one that produces `0 / 0 / 0 / 10 / 0` from `before/`, and [`audit/report_final.json`](audit/report_final.json), the `0 / 0 / 0 / 0 / 0` result. Treat this table as a record of what was observed at the time, not as a reproducible measurement.
