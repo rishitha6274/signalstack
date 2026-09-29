@@ -227,14 +227,23 @@ def fit_prompt_window(
     return window, len(ordered) - len(window)
 
 
-def omitted_span(signals: list[Signal], window: list[Signal]) -> str:
+def omitted_span(
+    signals: list[Signal], window: list[Signal], limit: int | None = None
+) -> str:
     """The date range the omitted signals cover, or "" if nothing is omitted.
 
     The window keeps the first signal and the most recent ones, so what is left
     out sits in the middle. "Nothing before 2026-05-01" would be false; the
     honest description is the span the gaps actually cover.
+
+    `limit` must be the same value passed to `fit_prompt_window`, because the
+    span is derived by replaying the same selection. Deriving it from the
+    window's own length instead -- which is the tempting shortcut, since the
+    length is right there -- is wrong: the window can be *larger* than the cap
+    when repeated transitions force extra signals in, and a cap reconstructed
+    from that length silently keeps everything and reports no omission at all.
     """
-    cap = max(MAX_SIGNALS_IN_PROMPT, len(window))
+    cap = MAX_SIGNALS_IN_PROMPT if limit is None else limit
     ordered = sorted(signals, key=lambda s: s.date)
     keep = _window_indices(ordered, cap)
     missing = sorted(ordered[i].date for i in range(len(ordered)) if i not in keep)
@@ -373,7 +382,7 @@ def build_prompt(
     # history, not a shorter history, and measuring across a gap the selection
     # created would invent a silence that never happened.
     clock = evidence_clock(signals, today=today)
-    span = omitted_span(signals, window)
+    span = omitted_span(signals, window, MAX_SIGNALS_IN_PROMPT)
     facts = build_facts(signals, today=clock.today, staleness=clock.staleness,
                         omitted=omitted, omitted_span=span, window=window)
     coverage = (
@@ -399,10 +408,6 @@ def build_prompt(
         age_sentence=clock.age_sentence,
         facts_block=coverage + facts.render() + facts.overdue_instruction(),
     ) + GROUNDING_RULES
-
-
-def _first_date(signals: list[Signal]) -> str:
-    return signals[0].date if signals else "(none)"
 
 
 def _coerce_confidence(value: object) -> Confidence:
@@ -729,7 +734,8 @@ def generate_strategic_read(
     # below by restricting the quote check to the rendered window.
     window, omitted = fit_prompt_window(signals)
     facts = build_facts(signals, today=clock.today, staleness=clock.staleness,
-                        omitted=omitted, omitted_span=omitted_span(signals, window),
+                        omitted=omitted,
+                        omitted_span=omitted_span(signals, window, MAX_SIGNALS_IN_PROMPT),
                         window=window)
     timeline_text = " ".join(
         f"{signal.date} {signal.signal_type} {signal.summary}" for signal in window

@@ -2623,28 +2623,73 @@ def main() -> int:
     # without the disclosure. Each of these deletes one half of the guarantee
     # and must be caught.
 
-    def _prompt_window_is_newest(m=None):
-        """True when the prompt keeps the most recent signals."""
+    def _prompt_window_keeps_the_chain(m=None):
+        """True when the window keeps the first signal, the newest, and repeats.
+
+        Checked on a hand-built timeline rather than a run of identical types:
+        a single-type chain is one transition repeated N-1 times, so every
+        signal is a participant in a repeat and nothing is ever droppable. A
+        newest-only implementation would pass that fixture by accident, which
+        is exactly the regression this mutation is supposed to catch.
+        """
         mod = m or _syn_mod
+        # The first signal (messaging) is deliberately NOT part of the repeated
+        # feature->pricing pair. With a fixture where it were, the repeat rule
+        # would keep it anyway and deleting the first-signal rule would be a
+        # no-op -- the mutation would "pass" without proving anything.
+        types = ["messaging", "feature", "pricing", "hiring",
+                 "feature", "pricing", "funding", "feature"]
         sigs = [_Sig(competitor="B", date=f"2026-01-{i + 1:02d}",
-                     signal_type="pricing", summary=f"step {i}")
-                for i in range(6)]
+                     signal_type=t, summary=f"step {i}")
+                for i, t in enumerate(types)]
         kept, dropped = mod.fit_prompt_window(sigs, limit=3)
-        return dropped == 3 and kept[-1].date == sigs[-1].date
+        dates = {s.date for s in kept}
+        return (dropped == 1
+                and sigs[0].date in dates          # the first signal
+                and all(s.date in dates for s in sigs[-3:])   # recency
+                and all(s.date in dates for s in    # the repeat
+                        (sigs[1], sigs[2], sigs[4], sigs[5])))
 
     _recall_mutation_runs(
-        "P1: the prompt window keeping the OLDEST signals instead of the newest",
+        "P1: the prompt window keeping the NEWEST signals instead of the chain",
         lambda: _mutant_from(
             "backend.synthesis",
-            replacements=[("    return ordered[-cap:], len(ordered) - cap",
-                           "    return ordered[:cap], len(ordered) - cap  # MUTANT")]),
-        _prompt_window_is_newest,
+            replacements=[("    keep = {0, *range(len(ordered) - cap, len(ordered))}",
+                           "    keep = set(range(len(ordered) - cap, len(ordered)))  "
+                           "# MUTANT: newest only, first signal dropped")]),
+        _prompt_window_keeps_the_chain,
+    )
+
+    def _prompt_window_keeps_repeats(m=None):
+        """The weaker half of P1: recency intact, but repeats may be cut."""
+        mod = m or _syn_mod
+        types = ["messaging", "feature", "pricing", "hiring",
+                 "feature", "pricing", "funding", "feature"]
+        sigs = [_Sig(competitor="B", date=f"2026-01-{i + 1:02d}",
+                     signal_type=t, summary=f"step {i}")
+                for i, t in enumerate(types)]
+        kept, _ = mod.fit_prompt_window(sigs, limit=3)
+        dates = {s.date for s in kept}
+        # Indices 1,2 and 4,5. Two of them sit outside the most-recent block,
+        # so they are protected by the repeat rule alone.
+        return all(s.date in dates for s in (sigs[1], sigs[2], sigs[4], sigs[5]))
+
+    _recall_mutation_runs(
+        "P1b: the prompt window cutting a repeated transition in half",
+        lambda: _mutant_from(
+            "backend.synthesis",
+            replacements=[("        if counts[(earlier.signal_type, later.signal_type)] >= 2:",
+                           "        if False:  # MUTANT: repeats are not protected")]),
+        _prompt_window_keeps_repeats,
     )
 
     def _prompt_declares_omission(m=None):
         mod = m or _syn_mod
+        # Mixed types, for the same reason as P1: an identical-type chain can
+        # never be truncated, so a PARTIAL prompt would be unreachable.
         sigs = [_Sig(competitor="B", date=f"2026-02-{i + 1:02d}",
-                     signal_type="pricing", summary=f"step {i}")
+                     signal_type=["feature", "pricing", "hiring", "messaging",
+                                  "funding", "feature"][i], summary=f"step {i}")
                 for i in range(6)]
         # Lower the cap rather than padding the chain to today's default: the
         # property under test is the disclosure, not the particular number 40.
@@ -2654,8 +2699,14 @@ def main() -> int:
             prompt = mod.build_prompt("B", sigs, today=_date(2026, 3, 1))
         finally:
             mod.MAX_SIGNALS_IN_PROMPT = original
+        # Derived, not hardcoded to the cap: the window is the most recent N
+        # plus the first signal, so a cap of 3 shows 4 and asserting "3 of 6"
+        # would fail for the right reason on the wrong expectation.
+        kept, dropped = mod.fit_prompt_window(sigs, limit=3)
         return ("EVIDENCE COVERAGE: PARTIAL" in prompt
-                and "3 of 6" in prompt)
+                and dropped > 0
+                and f"{len(kept)} of {len(sigs)}" in prompt
+                and "repeated transition" in prompt)
 
     _recall_mutation_runs(
         "P2: truncating the prompt without telling the model what is missing",
@@ -2664,9 +2715,9 @@ def main() -> int:
             # The prompt is truncated exactly as before; what is deleted is
             # the admission of it. That is the failure being guarded against --
             # a window that never says it is one.
-            replacements=[("        if not omitted\n        else f\"- EVIDENCE COVERAGE: PARTIAL.",
+            replacements=[("        if not omitted\n        else (",
                            "        if True or not omitted  # MUTANT: the PARTIAL branch "
-                           "is unreachable\n        else f\"- EVIDENCE COVERAGE: PARTIAL.")]),
+                           "is unreachable\n        else (")]),
         _prompt_declares_omission,
     )
 
@@ -2675,7 +2726,7 @@ def main() -> int:
         facts = _facts_mod.build_facts(
             [_Sig(competitor="B", date="2026-02-01", signal_type="pricing",
                   summary="x")],
-            today=_date(2026, 3, 1), omitted=9, omitted_before="2025-01-01")
+            today=_date(2026, 3, 1), omitted=9, omitted_span="2025-01-01 to 2025-03-04")
         return mod.check_no_partial_claims(
             {"patterns": "Across their entire history they repriced.",
              "inferred_intent": "", "predicted_next_move": "",
@@ -2837,12 +2888,41 @@ def _prompt_budget_checks() -> None:
           "the cap is not configurable from the environment")
 
     def _chain(n: int) -> list[_Sig]:
+        """A long timeline of a single signal type.
+
+        Note this is a pathological shape under the current window rule: a run
+        of identical types is one transition repeated N-1 times, so every signal
+        is a participant and nothing may be dropped. The over-cap checks below
+        use `_mixed` instead, and say why.
+        """
         return [
             _Sig(competitor="Budget Co", date=f"2026-{1 + i // 28:02d}-"
                                              f"{1 + i % 28:02d}",
                  signal_type="pricing",
                  summary=f"Budget Co moved on step {i} of the pricing chain.")
             for i in range(n)
+        ]
+
+    def _mixed() -> list[_Sig]:
+        """Eight signals whose transition structure is known exactly.
+
+        Consecutive types, with the feature->pricing pair occurring twice:
+
+            1 feature  2 pricing  3 hiring  4 feature
+            5 pricing  6 messaging  7 feature  8 hiring
+
+        Pairs: (feature,pricing) x2 [signals 1,2 and 4,5], and one-offs at
+        3, 6, 7, 8. At cap=3 the window must keep signal 1 (the first), 6,7,8
+        (the most recent), and 1,2,4,5 (the repeat) -- leaving only signal 3
+        droppable.
+        """
+        types = ["feature", "pricing", "hiring", "feature",
+                 "pricing", "messaging", "feature", "hiring"]
+        return [
+            _Sig(competitor="Budget Co", date=f"2026-01-{i + 1:02d}",
+                 signal_type=t,
+                 summary=f"Step {i + 1}: a {t} signal from Budget Co.")
+            for i, t in enumerate(types)
         ]
 
     # Under the cap: nothing is dropped, and the prompt says so.
@@ -2857,37 +2937,131 @@ def _prompt_budget_checks() -> None:
     check("a complete read says how many signals it saw",
           f"All 5 signals" in _p_under, "")
 
-    # Over the cap: the newest survive, the oldest go, and both are reported.
-    _over = _chain(MAX_SIGNALS_IN_PROMPT + 12)
-    _win, _drop = _syn.fit_prompt_window(_over)
-    check("an over-long timeline is capped", len(_win) == MAX_SIGNALS_IN_PROMPT,
-          f"kept={len(_win)}")
-    check("the cap drops exactly the surplus", _drop == 12, f"dropped={_drop}")
-    check("the cap keeps the most recent signals, not the first ones",
-          [s.date for s in _win] == [s.date for s in _over[-MAX_SIGNALS_IN_PROMPT:]],
-          f"kept {[s.date for s in _win][:2]} vs newest "
-          f"{[s.date for s in _over[-MAX_SIGNALS_IN_PROMPT:]][:2]}")
-    check("the dropped signals are the oldest",
-          _win[0].date > _over[0].date,
-          f"first kept {_win[0].date} vs first overall {_over[0].date}")
+    # The three-part rule, on a timeline small enough to verify by hand.
+    _mx = _mixed()
+    _win, _drop = _syn.fit_prompt_window(_mx, limit=3)
+    _kept_dates = [s.date for s in _win]
+    check("the window is returned in date order",
+          _kept_dates == sorted(_kept_dates), f"{_kept_dates}")
+    check("the first signal survives the cap",
+          _win[0].date == _mx[0].date,
+          f"first kept {_win[0].date}, first overall {_mx[0].date}")
+    check("the most recent signals survive the cap",
+          all(s.date in _kept_dates for s in _mx[-3:]),
+          f"missing {[s.date for s in _mx[-3:] if s.date not in _kept_dates]}")
+    check("both instances of a repeated transition survive the cap",
+          all(s.date in _kept_dates for s in (_mx[0], _mx[1], _mx[3], _mx[4])),
+          "a repeated transition was cut in half by the window")
+    check("only the one-off interior signal is dropped",
+          _drop == 1 and _mx[2].date not in _kept_dates,
+          f"dropped={_drop} kept={_kept_dates}")
+    check("the counts and the window always add up to the bank",
+          len(_win) + _drop == len(_mx), f"{len(_win)}+{_drop} vs {len(_mx)}")
 
-    _p_over = _syn.build_prompt("Budget Co", _over, today=_date(2026, 3, 1))
+    # The cap is a floor for recency, not a hard ceiling. A timeline that is one
+    # repeating cycle end to end keeps everything, because dropping any signal
+    # would turn an observed repeat into an apparent one-off. Pinned here so the
+    # behaviour is deliberate: an over-long prompt over an understated timeline
+    # is the right side of that trade, and it is a real bound callers must know.
+    _repeating = _chain(MAX_SIGNALS_IN_PROMPT + 12)
+    _win, _drop = _syn.fit_prompt_window(_repeating)
+    check("a timeline that is one repeated transition is never truncated",
+          _drop == 0 and len(_win) == len(_repeating),
+          f"dropped={_drop} -- the window cut a repeat into an apparent one-off")
+
+    # Over the cap, on a timeline whose transitions are all DISTINCT so that
+    # something is actually droppable. This needs care: signal_type has five
+    # values, so a long timeline repeats transitions by pigeonhole no matter
+    # how it is arranged, and every signal then becomes protected. The fixture
+    # below is the longest arrangement found with no repeated pair (nine
+    # distinct pairs over ten signals), and the cap is lowered to 6 so the
+    # window is over-long relative to the cap rather than to the 40 default.
+    _distinct = ["pricing", "pricing", "feature", "pricing", "hiring",
+                 "pricing", "messaging", "pricing", "funding", "pricing"]
+    _over = [
+        _Sig(competitor="Budget Co", date=f"2026-01-{i + 1:02d}",
+             signal_type=t, summary=f"Budget Co step {i}, a {t} signal.")
+        for i, t in enumerate(_distinct)
+    ]
+    _cap = 6
+    _win, _drop = _syn.fit_prompt_window(_over, limit=_cap)
+    _kept_dates = [w.date for w in _win]
+    check("a timeline over the cap is truncated", _drop == 3,
+          f"dropped={_drop}, expected 3")
+    check("the first signal is kept even on an over-long timeline",
+          _win[0].date == _over[0].date,
+          f"first kept {_win[0].date} vs first overall {_over[0].date}")
+    check("the most recent signals are kept on an over-long timeline",
+          all(s.date in _kept_dates for s in _over[-_cap:]),
+          f"missing {[s.date for s in _over[-_cap:] if s.date not in _kept_dates]}")
+    check("the window is larger than the cap by exactly the first signal",
+          len(_win) == _cap + 1, f"kept={len(_win)}")
+    check("the dropped signals are the interior ones, not a tail",
+          _over[1].date not in _kept_dates and _over[2].date not in _kept_dates,
+          f"kept={_kept_dates}")
+
+    # The honest bound on the rule, pinned as a test rather than left for
+    # someone to rediscover. `limit` is a floor for recency, not a ceiling:
+    # with five signal types, a timeline of any real length repeats transitions
+    # by pigeonhole, so in practice the cap stops being a cap and the prompt
+    # carries the whole bank. The prompt-budget machinery still pays for itself
+    # -- the coverage line, the provenance fields and the validator all report
+    # the real numbers -- but nobody should believe MAX_SIGNALS_IN_PROMPT bounds
+    # this prompt's size. Widening signal_type, or capping the number of
+    # protected repeats, is the fix if that ever matters.
+    _real = [
+        _Sig(competitor="Budget Co", date=f"2026-{1 + i // 28:02d}-"
+                                         f"{1 + i % 28:02d}",
+             signal_type=["pricing", "feature", "hiring", "messaging",
+                          "funding"][i % 5],
+             summary=f"Budget Co step {i}.")
+        for i in range(MAX_SIGNALS_IN_PROMPT + 12)
+    ]
+    # Separate names: _win/_drop still describe _over, and the checks below
+    # build their prompt and facts from that window. Overwriting them here
+    # silently pointed the coverage and validator checks at the wrong timeline.
+    _win_real, _drop_real = _syn.fit_prompt_window(_real)
+    check("with five signal types the cap is not a hard ceiling",
+          _drop_real == 0 and len(_win_real) == len(_real),
+          f"dropped={_drop_real} kept={len(_win_real)} -- if this now "
+          f"truncates, the bound changed and this test needs re-reading, not "
+          f"deleting")
+    _p_real = _syn.build_prompt("Budget Co", _real, today=_date(2026, 3, 1))
+    check("a bank carried whole is still labelled COMPLETE",
+          "EVIDENCE COVERAGE: COMPLETE" in _p_real
+          and f"All {len(_real)} signals" in _p_real, "")
+
+    _original_cap = _syn.MAX_SIGNALS_IN_PROMPT
+    _syn.MAX_SIGNALS_IN_PROMPT = _cap
+    try:
+        _p_over = _syn.build_prompt("Budget Co", _over, today=_date(2026, 3, 1))
+        _facts_partial = _facts_mod.build_facts(
+            _over, today=_date(2026, 3, 1), omitted=_drop,
+            omitted_span=_syn.omitted_span(_over, _win, _cap), window=_win)
+    finally:
+        _syn.MAX_SIGNALS_IN_PROMPT = _original_cap
+
     check("a truncated read is labelled PARTIAL",
           "EVIDENCE COVERAGE: PARTIAL" in _p_over, "")
     check("a truncated read states how many signals it saw and how many exist",
-          f"{MAX_SIGNALS_IN_PROMPT} of {MAX_SIGNALS_IN_PROMPT + 12}" in _p_over,
+          f"{len(_win)} of {len(_over)}" in _p_over,
           "the coverage line does not give both counts")
-    check("a truncated read names the date the window opens",
-          _win[0].date in _p_over, "the window start date is not in the prompt")
-    check("a truncated read tells the model the oldest are NOT shown",
-          "the 12 OLDEST are NOT" in _p_over, "")
+    check("a truncated read says what the window keeps",
+          all(t in _p_over for t in ("the first signal", "the most recent",
+                                     "repeated transition")),
+          "the model is not told how the window was chosen")
+    check("a truncated read states the cap it used",
+          f"the {_cap} most recent" in _p_over,
+          "the coverage line names a cap the caller never used")
+    check("a truncated read does not claim the oldest are simply missing",
+          "OLDEST" not in _p_over,
+          "the coverage line still describes a tail, but the window keeps the first")
     check("the omitted signals are absent from the rendered timeline",
-          _over[0].summary not in _p_over,
+          all(s.summary not in _p_over for s in _over
+              if s.date not in [w.date for w in _win]),
           "an omitted signal is still in the prompt")
 
     # The validator: a window described as the whole history is a defect.
-    _facts_partial = _facts_mod.build_facts(
-        _win, today=_date(2026, 3, 1), omitted=_drop, omitted_before=_win[0].date)
     _claims = {
         "patterns": "Across their entire history they repriced on a cadence.",
         "inferred_intent": "Monetisation pressure.",
@@ -2898,20 +3072,36 @@ def _prompt_budget_checks() -> None:
     check("a completeness claim over a window is rejected",
           bool(_val.check_no_partial_claims(_claims, _facts_partial)),
           "the validator accepted a whole-history claim built from a window")
-    check("the rejection names the counts and the window start",
-          all(t in _val.check_no_partial_claims(_claims, _facts_partial)[0]
-              for t in (str(MAX_SIGNALS_IN_PROMPT), _win[0].date)),
-          f"got {_val.check_no_partial_claims(_claims, _facts_partial)}")
+    _reject = _val.check_no_partial_claims(_claims, _facts_partial)[0]
+    check("the rejection names the shown count and the total",
+          str(len(_win)) in _reject and str(len(_over)) in _reject,
+          f"got {_reject!r}")
+    check("the rejection names the omitted span, not a before-date",
+          _facts_partial.omitted_span in _reject and "nothing before" not in _reject,
+          f"got {_reject!r}")
     _disclosed = dict(_claims, patterns=(
-        f"Across the {MAX_SIGNALS_IN_PROMPT} signals shown, from "
-        f"{_win[0].date}, they repriced on a cadence."))
+        f"Across the {len(_win)} signals shown, excluding {_drop} between "
+        f"{_facts_partial.omitted_span}, they repriced on a cadence."))
     check("a completeness claim that discloses the window is accepted",
           _val.check_no_partial_claims(_disclosed, _facts_partial) == [],
           f"got {_val.check_no_partial_claims(_disclosed, _facts_partial)}")
-    _facts_full = _facts_mod.build_facts(_over, today=_date(2026, 3, 1))
+    _facts_full = _facts_mod.build_facts(_real, today=_date(2026, 3, 1))
     check("with nothing omitted, completeness language is fine",
           _val.check_no_partial_claims(_claims, _facts_full) == [],
           "the validator fired on a complete timeline")
+
+    # Cadence is measured on the full timeline. A window is a subset of the
+    # history, not a shorter one, and measuring across a gap the selection
+    # created would invent a silence the company never had.
+    _gap_claim = _facts_mod.build_facts(
+        _over, today=_date(2026, 3, 1), omitted=_drop, window=_win)
+    check("the facts still measure the whole timeline, not the window",
+          _gap_claim.n == len(_over) and _gap_claim.shown == len(_win),
+          f"n={_gap_claim.n} shown={_gap_claim.shown}")
+    check("the reported cadence is the bank's, not the window's",
+          _gap_claim.intervals == _facts_mod.build_facts(
+              _over, today=_date(2026, 3, 1)).intervals,
+          "the intervals were measured across the selection's own gaps")
 
     # A cap of zero must fail loudly rather than produce an empty prompt.
     try:
@@ -2925,7 +3115,7 @@ def _prompt_budget_checks() -> None:
     # The read reports its own provenance.
     check("SynthesisResponse carries the prompt window counts",
           {"prompt_signal_count", "signals_omitted_from_prompt",
-           "prompt_window_opens"} <= set(
+           "prompt_omitted_span"} <= set(
               __import__("backend.models", fromlist=["SynthesisResponse"])
               .SynthesisResponse.model_fields),
           "the response does not report what the model actually saw")
@@ -2936,9 +3126,12 @@ def _prompt_budget_checks() -> None:
           "signals_omitted_from_prompt" in _app_src
           and "prompt_signal_count" in _app_src,
           "a truncated read renders as a whole one")
-    check("the UI names the date the window opens",
-          "prompt_window_opens" in _app_src,
-          "the reader is not told where the evidence starts")
+    check("the UI names the omitted span",
+          "prompt_omitted_span" in _app_src,
+          "the reader is not told where the evidence is missing")
+    check("the UI does not describe the window as the newest signals",
+          "most recent of" not in _app_src,
+          "the UI still describes a window the code no longer builds")
 
     # The startup model check: findings, not logging, and no exceptions.
     from backend import llm_client as _llm
