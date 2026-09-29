@@ -263,6 +263,7 @@ Seeded, live-verified, and left in a clean state: **71 signals retained across 1
 | `POST` | `/competitors`           | register a competitor, create its bank          |
 | `POST` | `/signals`               | raw text → LLM-extracted Signal → Hindsight     |
 | `GET`  | `/timeline/{competitor}` | complete chronological timeline                 |
+| `GET`  | `/recall/{competitor}`   | secondary question lookup, never used by synthesis |
 | `POST` | `/synthesize`            | strategic read                                  |
 
 ---
@@ -313,7 +314,7 @@ configuration. When the frontend and the backend are deployed separately, set
 one variable on the **frontend** service:
 
 ```bash
-BACKEND_URL=https://signalstack-backend.onrender.com
+BACKEND_URL=https://signalstack-backend-aca5.onrender.com
 ```
 
 The UI resolves its API base in this order: `BACKEND_URL`, then
